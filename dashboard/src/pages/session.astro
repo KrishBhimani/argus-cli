@@ -9,7 +9,26 @@ import Default from '../layouts/Default.astro';
 
   <script>
     import { api, type Turn } from '../scripts/api';
-    import { usd, tok, num, dur, agentTag, shortPath } from '../scripts/format';
+    import { usd, tok, num, dur, agentTag } from '../scripts/format';
+
+    const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const TZ_ABBREV = (() => {
+      const d = new Date();
+      const m = d.toLocaleTimeString('en-US', { timeZoneName: 'short' }).match(/[A-Z]{2,5}$/);
+      return m ? m[0] : '';
+    })();
+
+    const fmtLocalDateTime = (iso: string) => {
+      if (!iso) return '—';
+      return new Date(iso).toLocaleString([], {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      });
+    };
+    const fmtLocalTime = (iso: string) => {
+      if (!iso) return '—';
+      return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    };
 
     const id = new URLSearchParams(location.search).get('id');
     const root = document.getElementById('content')!;
@@ -28,7 +47,7 @@ import Default from '../layouts/Default.astro';
             <div class="card kpi"><span class="kpi-label">Cost</span><span class="kpi-value cost">${usd(s.total_cost_usd)}</span><span class="kpi-sub">${reportedDelta}</span></div>
             <div class="card kpi"><span class="kpi-label">Tokens</span><span class="kpi-value">${tok(totalTokens)}</span><span class="kpi-sub">${num(totalTokens)} total</span></div>
             <div class="card kpi"><span class="kpi-label">Turns</span><span class="kpi-value">${num(s.turn_count)}</span><span class="kpi-sub">${turns.length} loaded</span></div>
-            <div class="card kpi"><span class="kpi-label">Duration</span><span class="kpi-value">${dur(s.duration_sec)}</span><span class="kpi-sub">${s.started_at.replace('T', ' ').slice(0, 19)}</span></div>
+            <div class="card kpi"><span class="kpi-label">Duration</span><span class="kpi-value">${dur(s.duration_sec)}</span><span class="kpi-sub">started ${fmtLocalDateTime(s.started_at)}</span></div>
           </div>
 
           <div class="card" style="margin-bottom:1rem;">
@@ -38,6 +57,10 @@ import Default from '../layouts/Default.astro';
                 <tr><td style="width:25%;color:var(--text-2);">Agent</td><td>${agentTag(s.agent)} <code>${s.agent_version ?? ''}</code></td></tr>
                 <tr><td style="color:var(--text-2);">Project</td><td class="mono">${s.project_path || '—'}</td></tr>
                 <tr><td style="color:var(--text-2);">Primary model</td><td><code>${s.primary_model}</code></td></tr>
+                <tr><td style="color:var(--text-2);">Started</td><td>${fmtLocalDateTime(s.started_at)} <span style="color:var(--text-2);font-size:0.8rem;">${TZ_ABBREV} (${TZ})</span></td></tr>
+                <tr><td style="color:var(--text-2);">Ended</td><td>${s.ended_at ? fmtLocalDateTime(s.ended_at) : '<span style="color:var(--text-2);">— still active</span>'}</td></tr>
+                <tr><td style="color:var(--text-2);">Fresh input</td><td>${num(s.total_fresh_input_tokens)} tokens</td></tr>
+                <tr><td style="color:var(--text-2);">Output</td><td>${num(s.total_output_tokens)} tokens</td></tr>
                 <tr><td style="color:var(--text-2);">Cache writes</td><td>${num(s.total_cache_write_tokens)} tokens</td></tr>
                 <tr><td style="color:var(--text-2);">Cache reads</td><td>${num(s.total_cache_read_tokens)} tokens</td></tr>
                 <tr><td style="color:var(--text-2);">Pricing version</td><td><code>${s.pricing_table_version}</code></td></tr>
@@ -55,9 +78,12 @@ import Default from '../layouts/Default.astro';
           </div>` : ''}
 
           <div class="card">
-            <h3>Turns timeline</h3>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;">
+              <h3 style="margin:0;">Turns timeline</h3>
+              <span style="color:var(--text-2);font-size:0.75rem;">times in ${TZ_ABBREV} (${TZ})</span>
+            </div>
             ${turns.length ? `
-            <table>
+            <table style="margin-top:0.8rem;">
               <thead>
                 <tr>
                   <th class="num">#</th><th>Time</th><th>Model</th>
@@ -69,7 +95,7 @@ import Default from '../layouts/Default.astro';
                 ${turns.map((t: Turn) => `
                   <tr>
                     <td class="num">${t.sequence}</td>
-                    <td>${t.timestamp.slice(11, 19)}</td>
+                    <td>${fmtLocalTime(t.timestamp)}</td>
                     <td><code>${t.model}</code></td>
                     <td class="num">${num(t.fresh_input_tokens)}</td>
                     <td class="num">${num(t.cache_read_tokens)}</td>
