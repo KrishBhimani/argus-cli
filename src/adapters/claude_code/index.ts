@@ -1,15 +1,17 @@
 import type { Adapter } from '../adapter.js';
-import { discoverSessionFiles, subAgentFilesFor } from './discover.js';
+import { discoverSessionFiles } from './discover.js';
 import { ingestClaudeCodeFile } from './ingest_file.js';
 
 export class ClaudeCodeAdapter implements Adapter {
   readonly agent = 'claude_code' as const;
   constructor(private readonly root: string) {}
   rootPath() { return this.root; }
+  // Only top-level session files. Sub-agent files (<sid>/subagents/*.jsonl)
+  // are processed by the pipeline as a rollup under their parent session;
+  // they MUST NOT appear in this list or they'd be counted twice (once as
+  // their own session, once as a sub-session under the parent).
   async discoverSessionFiles() {
-    const top = await discoverSessionFiles(this.root);
-    const subs = top.flatMap(subAgentFilesFor);
-    return [...top, ...subs];
+    return discoverSessionFiles(this.root);
   }
   async ingestFile(filePath: string, fromOffset = 0) {
     return ingestClaudeCodeFile(filePath, fromOffset);

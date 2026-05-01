@@ -68,6 +68,7 @@ pricingCmd.command('refresh')
     }
     process.stdout.write('Apply? [y/N] ');
     const ans = await new Promise<string>(r => process.stdin.once('data', d => r(d.toString().trim())));
+    process.stdin.pause();
     if (ans.toLowerCase() === 'y') {
       const out = resolve(__dirname, '../pricing', `${fresh.version}.json`);
       writeFileSync(out, JSON.stringify(fresh, null, 2));
@@ -75,20 +76,23 @@ pricingCmd.command('refresh')
     } else {
       console.log('Cancelled.');
     }
+    process.exit(0);
   });
 
 program.command('wipe')
   .option('--data-dir <dir>', 'data dir', join(homedir(), '.argus'))
+  .option('-y, --yes', 'skip confirmation')
   .description('Delete all local Argus data')
-  .action(async ({ dataDir }) => {
-    process.stdout.write(`Delete ${dataDir}? [y/N] `);
-    const ans = await new Promise<string>(r => process.stdin.once('data', d => r(d.toString().trim())));
-    if (ans.toLowerCase() === 'y') {
-      rmSync(dataDir, { recursive: true, force: true });
-      console.log(`Deleted ${dataDir}`);
-    } else {
-      console.log('Cancelled.');
+  .action(async ({ dataDir, yes }) => {
+    if (!yes) {
+      process.stdout.write(`Delete ${dataDir}? [y/N] `);
+      const ans = await new Promise<string>(r => process.stdin.once('data', d => r(d.toString().trim())));
+      process.stdin.pause();
+      if (ans.toLowerCase() !== 'y') { console.log('Cancelled.'); process.exit(0); }
     }
+    rmSync(dataDir, { recursive: true, force: true });
+    console.log(`Deleted ${dataDir}`);
+    process.exit(0);
   });
 
 program.parseAsync().catch(e => { console.error(e); process.exit(1); });

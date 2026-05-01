@@ -55,6 +55,48 @@ describe('ingestFile pipeline', () => {
     expect(after3.total_cost_usd).toBe(after2.total_cost_usd);
   });
 
+  it('sub-agent files are NOT counted twice (regression: discoverSessionFiles + rollup)', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    const claudeRoot = join(dir, '.claude');
+    const proj = join(claudeRoot, 'projects', 'C--proj');
+    mkdirSync(proj, { recursive: true });
+    const parentFile = join(proj, 'parent.jsonl');
+    const subDir = join(proj, 'parent', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    const subFile = join(subDir, 'agent-aabc.jsonl');
+
+    const line = (sessionId: string, msgId: string, tokens: number) => JSON.stringify({
+      type: 'assistant', sessionId, uuid: 'u' + msgId, timestamp: '2026-05-01T00:00:00Z',
+      cwd: 'C:/proj', version: '2.1.94', userType: 'external', entrypoint: 'cli',
+      message: { id: msgId, model: 'claude-opus-4-7', role: 'assistant', content: [],
+        usage: { input_tokens: tokens, output_tokens: tokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+    }) + '\n';
+
+    writeFileSync(parentFile, line('parent', 'p1', 1_000_000) + line('parent', 'p2', 1_000_000));
+    writeFileSync(subFile, line('parent', 's1', 500_000));
+
+    const db = openDb(join(dir, 'argus.db'));
+    const repo = new Repository(db);
+    const adapter = new ClaudeCodeAdapter(claudeRoot);
+    const table = await loadPricingTable();
+
+    // Use the adapter's discover (NOT the lower-level discoverSessionFiles) — same path the CLI uses
+    const files = await adapter.discoverSessionFiles();
+    expect(files).toEqual([parentFile]); // sub-agent files MUST be excluded from discovery
+
+    for (const f of files) await ingestFile(adapter, f, repo, table);
+
+    const parent = repo.getSession('claude_code:parent')!;
+    expect(parent).toBeDefined();
+    // parent has 2 own turns (1M+1M each) plus sub-agent's 1 turn (500k+500k):
+    // total fresh = 2*1M + 1*500k = 2.5M, total output = 2.5M
+    expect(parent.total_fresh_input_tokens).toBe(2_500_000);
+    expect(parent.total_output_tokens).toBe(2_500_000);
+    // turn count includes sub-agent's turn(s) via rollup metadata, but the
+    // headline figure should be 2 (parent's own) + 1 (sub) = 3
+    expect(parent.turn_count).toBe(3);
+  });
+
   it('ingests a synthetic Claude Code session end-to-end', async () => {
     const claudeRoot = join(dir, '.claude');
     const proj = join(claudeRoot, 'projects', 'C--proj');

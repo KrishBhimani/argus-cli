@@ -6,6 +6,12 @@ export interface ApiDeps { pricingTableVersion: string; ingestStatus: () => Inge
 
 const WINDOWS: Record<string, number | null> = { 'today': 1, '7d': 7, '30d': 30, 'all': null };
 
+// Sub-agent sessions are stored as their own rows under ids like
+// "<agent>:<parent>/<subagent-file>". They've already been rolled up into
+// their parent session's totals, so we must exclude them from any aggregate
+// view to avoid double-counting.
+const isTopLevel = (id: string) => !id.includes('/');
+
 function weekOf(iso: string): string {
   const d = new Date(iso);
   const start = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
@@ -20,7 +26,8 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     const limit = Number(c.req.query('limit') ?? 100);
     const offset = Number(c.req.query('offset') ?? 0);
     const agent = c.req.query('agent') ?? undefined;
-    const sessions = repo.listSessions({ limit, offset, agent });
+    const includeSub = c.req.query('includeSub') === 'true';
+    const sessions = repo.listSessions({ limit, offset, agent }).filter(s => includeSub || isTopLevel(s.id));
     return c.json({ sessions });
   });
 
@@ -36,7 +43,7 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     const window = c.req.query('window') ?? '7d';
     const days = WINDOWS[window];
     const cutoff = days ? new Date(Date.now() - days * 86_400_000).toISOString() : '0';
-    const all = repo.listSessions({ limit: 100_000 }).filter(s => s.started_at >= cutoff);
+    const all = repo.listSessions({ limit: 100_000 }).filter(s => isTopLevel(s.id) && s.started_at >= cutoff);
 
     const totals = all.reduce((a, s) => ({
       cost: a.cost + s.total_cost_usd,
@@ -66,7 +73,7 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
   app.get('/api/trends', (c) => {
     const granularity = (c.req.query('granularity') ?? 'day') as 'day' | 'week' | 'month';
     const groupBy = (c.req.query('groupBy') ?? 'agent') as 'agent' | 'model';
-    const all = repo.listSessions({ limit: 100_000 });
+    const all = repo.listSessions({ limit: 100_000 }).filter(s => isTopLevel(s.id));
     const bucket = (iso: string) => granularity === 'day' ? iso.slice(0, 10)
       : granularity === 'week' ? `${iso.slice(0, 4)}-W${weekOf(iso)}`
       : iso.slice(0, 7);
@@ -87,12 +94,12 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
   app.get('/api/pricing', (c) => c.json({ version: deps.pricingTableVersion }));
 
   app.get('/api/export.json', (c) => {
-    const sessions = repo.listSessions({ limit: 1_000_000 });
+    const sessions = repo.listSessions({ limit: 1_000_000 }).filter(s => isTopLevel(s.id));
     return c.json({ sessions });
   });
 
   app.get('/api/export.csv', (c) => {
-    const rows = repo.listSessions({ limit: 1_000_000 });
+    const rows = repo.listSessions({ limit: 1_000_000 }).filter(s => isTopLevel(s.id));
     const header = 'id,agent,started_at,ended_at,project_path,primary_model,total_cost_usd,total_fresh_input_tokens,total_output_tokens,turn_count\n';
     const body = rows.map(s => [s.id, s.agent, s.started_at, s.ended_at ?? '', s.project_path, s.primary_model, s.total_cost_usd, s.total_fresh_input_tokens, s.total_output_tokens, s.turn_count].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     return c.body(header + body, 200, { 'content-type': 'text/csv' });
