@@ -1,0 +1,40 @@
+{
+  "name": "argus-cli",
+  "version": "0.1.0",
+  "description": "Local-first dashboard for coding-agent cost and token analytics across Claude Code and Codex CLI",
+  "type": "module",
+  "bin": {
+    "argus": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "pricing",
+    "dashboard-dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && npm run build:dashboard",
+    "build:dashboard": "cd dashboard && npm run build && cp -r dist ../dashboard-dist",
+    "dev": "tsx watch src/cli.ts start",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "chokidar": "^4.0.3",
+    "commander": "^12.1.0",
+    "hono": "^4.12.16",
+    "open": "^10.2.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.19.17",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}

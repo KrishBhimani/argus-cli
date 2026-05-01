@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.anthropic.com)",
+      "WebFetch(domain:openai.com)",
+      "WebSearch",
+      "Bash(curl -s \"https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching\" -L -A \"Mozilla/5.0\")"
+    ]
+  }
+}

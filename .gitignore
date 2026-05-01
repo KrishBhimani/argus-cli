@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dashboard-dist/
+dashboard/dist/
+dashboard/.astro/
+*.log
+.env
+.env.local
+.argus/
+.DS_Store
+.vitest-cache/
+coverage/
