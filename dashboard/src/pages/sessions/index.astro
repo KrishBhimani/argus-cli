@@ -1,0 +1,98 @@
+---
+import Default from '../../layouts/Default.astro';
+---
+<Default title="Argus — Sessions">
+  <h2>Sessions</h2>
+  <div class="card" style="margin-bottom:1rem;">
+    <div style="display:flex;gap:0.6rem;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="search" placeholder="Search project, model, or id…" style="flex:1;min-width:200px;" />
+      <select id="agent-filter">
+        <option value="">All agents</option>
+        <option value="claude_code">Claude Code</option>
+        <option value="codex">Codex</option>
+      </select>
+      <span id="count" style="color:var(--text-2);font-size:0.85rem;"></span>
+    </div>
+  </div>
+
+  <div class="card" style="padding:0;overflow:auto;max-height:75vh;">
+    <table id="t">
+      <thead>
+        <tr>
+          <th data-sort="started_at" class="sorted">Started</th>
+          <th data-sort="agent">Agent</th>
+          <th data-sort="project_path">Project</th>
+          <th data-sort="primary_model">Model</th>
+          <th data-sort="duration_sec" class="num">Duration</th>
+          <th data-sort="turn_count" class="num">Turns</th>
+          <th data-sort="tokens" class="num">Tokens</th>
+          <th data-sort="total_cost_usd" class="num">Cost</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    import { api, type Session } from '../../scripts/api';
+    import { usd, tok, num, shortDate, shortPath, agentTag, dur } from '../../scripts/format';
+
+    let all: Session[] = [];
+    let sortKey = 'started_at';
+    let sortDesc = true;
+
+    const $ = (s: string) => document.querySelector(s) as HTMLElement;
+    const tbody = $('#t tbody');
+    const search = $('#search') as HTMLInputElement;
+    const agentFilter = $('#agent-filter') as HTMLSelectElement;
+    const count = $('#count');
+
+    function tokens(s: Session) { return s.total_fresh_input_tokens + s.total_output_tokens + s.total_cache_read_tokens + s.total_cache_write_tokens; }
+
+    function render() {
+      const q = search.value.toLowerCase();
+      const af = agentFilter.value;
+      let rows = all.filter(s =>
+        (!af || s.agent === af) &&
+        (!q || s.id.toLowerCase().includes(q) || s.project_path.toLowerCase().includes(q) || s.primary_model.toLowerCase().includes(q))
+      );
+      const get = (s: Session, k: string) => k === 'tokens' ? tokens(s) : (s as any)[k];
+      rows.sort((a, b) => {
+        const av = get(a, sortKey), bv = get(b, sortKey);
+        const cmp = av == null ? -1 : bv == null ? 1 : av < bv ? -1 : av > bv ? 1 : 0;
+        return sortDesc ? -cmp : cmp;
+      });
+      count.textContent = `${rows.length} of ${all.length} sessions`;
+      tbody.innerHTML = rows.map(s => `
+        <tr data-id="${encodeURIComponent(s.id)}">
+          <td>${shortDate(s.started_at)}</td>
+          <td>${agentTag(s.agent)}</td>
+          <td class="mono">${shortPath(s.project_path, 50)}</td>
+          <td>${s.primary_model}</td>
+          <td class="num">${dur(s.duration_sec)}</td>
+          <td class="num">${num(s.turn_count)}</td>
+          <td class="num">${tok(tokens(s))}</td>
+          <td class="num cost">${usd(s.total_cost_usd)}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="8" class="empty">No sessions match.</td></tr>';
+      tbody.querySelectorAll('tr[data-id]').forEach(tr => {
+        tr.addEventListener('click', () => location.href = '/session?id=' + (tr as HTMLElement).dataset.id);
+      });
+    }
+
+    document.querySelectorAll('th[data-sort]').forEach(th => {
+      th.addEventListener('click', () => {
+        const k = (th as HTMLElement).dataset.sort!;
+        if (k === sortKey) sortDesc = !sortDesc;
+        else { sortKey = k; sortDesc = true; }
+        document.querySelectorAll('th[data-sort]').forEach(x => x.className = x.classList.contains('num') ? 'num' : '');
+        th.className = (sortDesc ? 'sorted' : 'sorted-asc') + (th.classList.contains('num') ? ' num' : '');
+        render();
+      });
+    });
+    search.addEventListener('input', render);
+    agentFilter.addEventListener('change', render);
+
+    api.sessions('?limit=10000').then(({ sessions }) => { all = sessions; render(); });
+  </script>
+</Default>

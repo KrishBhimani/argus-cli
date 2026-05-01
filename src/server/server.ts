@@ -18,10 +18,17 @@ export async function startServer(repo: Repository, opts: ServerOpts): Promise<{
   root.route('/', api);
   root.use('/*', serveStatic({ root: opts.dashboardDir }));
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = serve({ fetch: root.fetch, port: opts.port }, (info) => {
       const url = `http://localhost:${info.port}`;
       resolve({ url, stop: () => new Promise<void>(r => server.close(() => r())) });
+    });
+    server.on('error', (e: NodeJS.ErrnoException) => {
+      if (e.code === 'EADDRINUSE') {
+        reject(new Error(`Port ${opts.port} is already in use. Another argus instance may be running. Try: argus start --port ${opts.port + 1}`));
+      } else {
+        reject(e);
+      }
     });
   });
 }

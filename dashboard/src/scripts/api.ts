@@ -1,0 +1,53 @@
+export interface Session {
+  id: string;
+  agent: 'claude_code' | 'codex';
+  agent_version: string | null;
+  project_path: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_sec: number | null;
+  total_fresh_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_cost_usd: number;
+  primary_model: string;
+  turn_count: number;
+  pricing_table_version: string;
+  computed_at: string;
+  agent_reported_cost_usd: number | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface Turn {
+  id: string;
+  session_id: string;
+  sequence: number;
+  timestamp: string;
+  model: string;
+  fresh_input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  tool_calls_count: number;
+  cost_usd: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface Overview {
+  window: string;
+  total_cost_usd: number;
+  total_tokens: number;
+  session_count: number;
+  agent_split: Record<string, { cost: number; sessions: number; tokens: number }>;
+  cost_by_day: Record<string, number>;
+}
+
+export const api = {
+  sessions: (q = '') => fetch('/api/sessions' + q).then(r => r.json() as Promise<{ sessions: Session[] }>),
+  session: (id: string) => fetch('/api/sessions/' + encodeURIComponent(id)).then(r => r.ok ? r.json() as Promise<{ session: Session; turns: Turn[] }> : null),
+  overview: (window: string) => fetch('/api/overview?window=' + window).then(r => r.json() as Promise<Overview>),
+  trends: (granularity: string, groupBy: string) => fetch(`/api/trends?granularity=${granularity}&groupBy=${groupBy}`).then(r => r.json() as Promise<{ points: { bucket: string; groups: Record<string, { cost: number; tokens: number; sessions: number }> }[] }>),
+  pricing: () => fetch('/api/pricing').then(r => r.json() as Promise<{ version: string }>),
+  parseErrors: () => fetch('/api/parse-errors').then(r => r.json() as Promise<{ errors: { file: string; reason: string; raw_line_truncated: string }[] }>),
+};

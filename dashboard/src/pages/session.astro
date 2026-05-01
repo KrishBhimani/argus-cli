@@ -1,0 +1,88 @@
+---
+import Default from '../layouts/Default.astro';
+---
+<Default title="Argus — Session">
+  <p style="margin:0 0 1rem;"><a href="/sessions">← All sessions</a></p>
+  <div id="content">
+    <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
+  </div>
+
+  <script>
+    import { api, type Turn } from '../scripts/api';
+    import { usd, tok, num, dur, agentTag, shortPath } from '../scripts/format';
+
+    const id = new URLSearchParams(location.search).get('id');
+    const root = document.getElementById('content')!;
+    if (!id) { root.innerHTML = '<p class="empty">No session id.</p>'; }
+    else {
+      api.session(id).then(d => {
+        if (!d) { root.innerHTML = '<p class="empty">Session not found.</p>'; return; }
+        const { session: s, turns } = d;
+        const totalTokens = s.total_fresh_input_tokens + s.total_output_tokens + s.total_cache_read_tokens + s.total_cache_write_tokens;
+        const subAgents = (s.metadata as any)?.sub_agent_session_ids as string[] | undefined;
+        const reportedDelta = s.agent_reported_cost_usd != null
+          ? `<span style="color:var(--text-2);font-size:0.8rem;"> (agent reported: ${usd(s.agent_reported_cost_usd)})</span>` : '';
+
+        root.innerHTML = `
+          <div class="grid-cards" style="margin-bottom:1.2rem;">
+            <div class="card kpi"><span class="kpi-label">Cost</span><span class="kpi-value cost">${usd(s.total_cost_usd)}</span><span class="kpi-sub">${reportedDelta}</span></div>
+            <div class="card kpi"><span class="kpi-label">Tokens</span><span class="kpi-value">${tok(totalTokens)}</span><span class="kpi-sub">${num(totalTokens)} total</span></div>
+            <div class="card kpi"><span class="kpi-label">Turns</span><span class="kpi-value">${num(s.turn_count)}</span><span class="kpi-sub">${turns.length} loaded</span></div>
+            <div class="card kpi"><span class="kpi-label">Duration</span><span class="kpi-value">${dur(s.duration_sec)}</span><span class="kpi-sub">${s.started_at.replace('T', ' ').slice(0, 19)}</span></div>
+          </div>
+
+          <div class="card" style="margin-bottom:1rem;">
+            <h3>Session</h3>
+            <table style="border:none;">
+              <tbody>
+                <tr><td style="width:25%;color:var(--text-2);">Agent</td><td>${agentTag(s.agent)} <code>${s.agent_version ?? ''}</code></td></tr>
+                <tr><td style="color:var(--text-2);">Project</td><td class="mono">${s.project_path || '—'}</td></tr>
+                <tr><td style="color:var(--text-2);">Primary model</td><td><code>${s.primary_model}</code></td></tr>
+                <tr><td style="color:var(--text-2);">Cache writes</td><td>${num(s.total_cache_write_tokens)} tokens</td></tr>
+                <tr><td style="color:var(--text-2);">Cache reads</td><td>${num(s.total_cache_read_tokens)} tokens</td></tr>
+                <tr><td style="color:var(--text-2);">Pricing version</td><td><code>${s.pricing_table_version}</code></td></tr>
+                <tr><td style="color:var(--text-2);">Session id</td><td class="mono" style="word-break:break-all;">${s.id}</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          ${subAgents?.length ? `
+          <div class="card" style="margin-bottom:1rem;">
+            <h3>Sub-agents (${subAgents.length})</h3>
+            <ul style="margin:0;padding-left:1.2rem;color:var(--text-1);font-size:0.88rem;">
+              ${subAgents.map(id => `<li><a href="/session?id=${encodeURIComponent(id)}" class="mono">${id}</a></li>`).join('')}
+            </ul>
+          </div>` : ''}
+
+          <div class="card">
+            <h3>Turns timeline</h3>
+            ${turns.length ? `
+            <table>
+              <thead>
+                <tr>
+                  <th class="num">#</th><th>Time</th><th>Model</th>
+                  <th class="num">Fresh in</th><th class="num">Cache read</th><th class="num">Cache write</th>
+                  <th class="num">Output</th><th class="num">Tools</th><th class="num">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${turns.map((t: Turn) => `
+                  <tr>
+                    <td class="num">${t.sequence}</td>
+                    <td>${t.timestamp.slice(11, 19)}</td>
+                    <td><code>${t.model}</code></td>
+                    <td class="num">${num(t.fresh_input_tokens)}</td>
+                    <td class="num">${num(t.cache_read_tokens)}</td>
+                    <td class="num">${num(t.cache_write_tokens)}</td>
+                    <td class="num">${num(t.output_tokens)}</td>
+                    <td class="num">${t.tool_calls_count}</td>
+                    <td class="num cost">${usd(t.cost_usd)}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>` : '<p class="empty">No turns recorded for this session.</p>'}
+          </div>
+        `;
+      });
+    }
+  </script>
+</Default>

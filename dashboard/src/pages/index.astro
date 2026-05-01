@@ -1,0 +1,126 @@
+---
+import Default from '../layouts/Default.astro';
+---
+<Default title="Argus — Overview">
+  <section class="hero">
+    <div class="hero-controls">
+      <select id="window">
+        <option value="today">Today</option>
+        <option value="7d" selected>Last 7 days</option>
+        <option value="30d">Last 30 days</option>
+        <option value="all">All time</option>
+      </select>
+    </div>
+    <div class="hero-cost"><span class="skel" style="width:5em;height:1em;"></span></div>
+    <p class="hero-sub">
+      <span id="hero-tokens">—</span> tokens · <span id="hero-sessions">—</span> sessions
+      <span id="hero-avg" style="margin-left:1em;color:var(--text-2);"></span>
+    </p>
+  </section>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>Cost over time</h3>
+      <div id="line" class="chart"></div>
+    </div>
+    <div class="card">
+      <h3>Spend by agent</h3>
+      <div id="agents" class="chart"></div>
+      <div id="agents-stats" style="margin-top:0.8rem;font-size:0.85rem;color:var(--text-1);"></div>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-top:1.2rem;">
+    <div class="card">
+      <h3>Daily heatmap (last 90 days)</h3>
+      <div id="heatmap" class="chart"></div>
+    </div>
+    <div class="card">
+      <h3>Top models by cost (window)</h3>
+      <div id="models" class="chart"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:1.2rem;">
+    <h3>Recent sessions</h3>
+    <div id="recent"></div>
+  </div>
+
+  <script>
+    import { api } from '../scripts/api';
+    import { usd, tok, num, shortDate, shortPath, agentTag } from '../scripts/format';
+    import { lineCost, agentSplit, calendarHeatmap, modelMix } from '../scripts/charts';
+
+    const $ = (s: string) => document.querySelector(s) as HTMLElement;
+    const sel = $('#window') as HTMLSelectElement;
+
+    let lineChart: any, agentChart: any, heatChart: any, modelsChart: any;
+
+    async function refresh() {
+      const window = sel.value;
+      const [overview, allSessions] = await Promise.all([api.overview(window), api.sessions('?limit=500')]);
+
+      $('.hero-cost')!.textContent = usd(overview.total_cost_usd);
+      $('#hero-tokens')!.textContent = tok(overview.total_tokens);
+      $('#hero-sessions')!.textContent = num(overview.session_count);
+      const avg = overview.session_count ? overview.total_cost_usd / overview.session_count : 0;
+      $('#hero-avg')!.textContent = overview.session_count ? `· ${usd(avg)} avg/session` : '';
+
+      const cutoffMs = window === 'today' ? Date.now() - 86_400_000
+        : window === '7d' ? Date.now() - 7 * 86_400_000
+        : window === '30d' ? Date.now() - 30 * 86_400_000 : 0;
+      const inWindow = allSessions.sessions.filter((s: any) => new Date(s.started_at).getTime() >= cutoffMs);
+
+      const days = Object.entries(overview.cost_by_day).sort().map(([day, cost]) => ({ day, cost: cost as number }));
+      lineChart?.dispose();
+      if (days.length) lineChart = lineCost($('#line'), days);
+      else $('#line').innerHTML = '<p class="empty">No spend in this window.</p>';
+
+      agentChart?.dispose();
+      agentChart = agentSplit($('#agents'), overview.agent_split);
+      $('#agents-stats').innerHTML = Object.entries(overview.agent_split).map(([k, v]: any) =>
+        `<div style="display:flex;justify-content:space-between;padding:0.2rem 0;">
+          ${agentTag(k)}<span>${num(v.sessions)} sessions · ${tok(v.tokens)} tokens</span>
+        </div>`
+      ).join('') || '<div class="empty" style="padding:0.5rem;">—</div>';
+
+      const cost90 = overview.cost_by_day; // already 7d/30d; for heatmap we want broader — fetch all
+      const allOv = window === 'all' ? overview : await api.overview('all');
+      const allDays = Object.entries(allOv.cost_by_day).sort().map(([day, cost]) => ({ day, cost: cost as number }));
+      heatChart?.dispose();
+      heatChart = calendarHeatmap($('#heatmap'), allDays, 90);
+
+      const modelTotals = new Map<string, number>();
+      for (const s of inWindow) modelTotals.set(s.primary_model, (modelTotals.get(s.primary_model) ?? 0) + s.total_cost_usd);
+      const modelsList = [...modelTotals.entries()].sort((a, b) => b[1] - a[1]).map(([name, cost]) => ({ name, cost }));
+      modelsChart?.dispose();
+      if (modelsList.length) modelsChart = modelMix($('#models'), modelsList);
+      else $('#models').innerHTML = '<p class="empty">No data.</p>';
+
+      const recentTop = inWindow.sort((a: any, b: any) => b.total_cost_usd - a.total_cost_usd).slice(0, 5);
+      $('#recent').innerHTML = recentTop.length ? `
+        <table>
+          <thead><tr><th>Started</th><th>Agent</th><th>Project</th><th>Model</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+          <tbody>
+            ${recentTop.map((s: any) => `
+              <tr data-id="${encodeURIComponent(s.id)}">
+                <td>${shortDate(s.started_at)}</td>
+                <td>${agentTag(s.agent)}</td>
+                <td class="mono">${shortPath(s.project_path)}</td>
+                <td>${s.primary_model}</td>
+                <td class="num">${tok(s.total_fresh_input_tokens + s.total_output_tokens)}</td>
+                <td class="num cost">${usd(s.total_cost_usd)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>` : '<p class="empty">No sessions in this window.</p>';
+      $('#recent').querySelectorAll('tr[data-id]').forEach(tr => {
+        tr.addEventListener('click', () => location.href = '/session?id=' + (tr as HTMLElement).dataset.id);
+      });
+    }
+
+    sel.addEventListener('change', refresh);
+    refresh();
+    window.addEventListener('resize', () => [lineChart, agentChart, heatChart, modelsChart].forEach(c => c?.resize()));
+  </script>
+</Default>

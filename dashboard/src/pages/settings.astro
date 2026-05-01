@@ -1,0 +1,59 @@
+---
+import Default from '../layouts/Default.astro';
+---
+<Default title="Argus — Settings">
+  <h2>Settings</h2>
+  <div class="grid-2">
+    <div>
+      <div class="card">
+        <h3>Pricing</h3>
+        <p>Pricing table version: <code id="pv">…</code></p>
+        <p style="color:var(--text-1);font-size:0.85rem;">To refresh from LiteLLM, run in terminal:</p>
+        <pre>argus pricing refresh</pre>
+      </div>
+      <div class="card">
+        <h3>Export data</h3>
+        <p style="color:var(--text-1);font-size:0.85rem;">All session metadata. No prompts, responses, or code are stored.</p>
+        <p>
+          <a href="/api/export.json" download class="button-link"><button>Download JSON</button></a>
+          &nbsp;
+          <a href="/api/export.csv" download class="button-link"><button>Download CSV</button></a>
+        </p>
+      </div>
+      <div class="card">
+        <h3>Wipe local data</h3>
+        <p style="color:var(--text-1);font-size:0.85rem;">Delete <code>~/.argus/</code> from disk. Cannot be undone — must run from terminal:</p>
+        <pre>argus wipe</pre>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h3>Ingest status</h3>
+        <pre id="status">…</pre>
+      </div>
+      <div class="card">
+        <h3>Parse errors</h3>
+        <p id="err-count" style="color:var(--text-2);font-size:0.85rem;">…</p>
+        <pre id="errs" style="max-height:300px;overflow:auto;font-size:0.78rem;"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    import { api } from '../scripts/api';
+    async function load() {
+      const [p, e, s] = await Promise.all([
+        api.pricing(),
+        api.parseErrors(),
+        fetch('/api/ingest/status').then(r => r.json()),
+      ]);
+      document.getElementById('pv')!.textContent = p.version;
+      document.getElementById('status')!.textContent = JSON.stringify(s, null, 2);
+      document.getElementById('err-count')!.textContent = e.errors.length === 0
+        ? 'No parse errors recorded. Healthy.'
+        : `${e.errors.length} recent parse error${e.errors.length === 1 ? '' : 's'}.`;
+      document.getElementById('errs')!.textContent = e.errors.length === 0 ? '' : JSON.stringify(e.errors, null, 2);
+    }
+    load();
+  </script>
+</Default>

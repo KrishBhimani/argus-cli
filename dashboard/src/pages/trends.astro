@@ -1,0 +1,51 @@
+---
+import Default from '../layouts/Default.astro';
+---
+<Default title="Argus — Trends">
+  <h2>Trends</h2>
+  <div class="card" style="margin-bottom:1rem;display:flex;gap:0.8rem;flex-wrap:wrap;align-items:center;">
+    <label style="color:var(--text-2);font-size:0.8rem;">Granularity</label>
+    <select id="g"><option>day</option><option>week</option><option selected>month</option></select>
+    <label style="color:var(--text-2);font-size:0.8rem;">Group by</label>
+    <select id="b"><option>agent</option><option>model</option></select>
+  </div>
+  <div class="card">
+    <div id="line" class="chart-tall"></div>
+  </div>
+  <div class="card" style="margin-top:1rem;overflow:auto;max-height:60vh;">
+    <h3>Breakdown</h3>
+    <div id="breakdown"></div>
+  </div>
+
+  <script>
+    import { api } from '../scripts/api';
+    import { usd, num } from '../scripts/format';
+    import { trendsLine } from '../scripts/charts';
+
+    const $ = (s: string) => document.querySelector(s) as HTMLElement;
+    let chart: any;
+
+    async function refresh() {
+      const g = ($('#g') as HTMLSelectElement).value;
+      const b = ($('#b') as HTMLSelectElement).value;
+      const { points } = await api.trends(g, b);
+      chart?.dispose();
+      if (points.length) chart = trendsLine($('#line'), points);
+      else $('#line').innerHTML = '<p class="empty">No data.</p>';
+
+      const allKeys = [...new Set(points.flatMap(p => Object.keys(p.groups)))];
+      $('#breakdown').innerHTML = points.length ? `
+        <table>
+          <thead><tr><th>${g.charAt(0).toUpperCase() + g.slice(1)}</th>${allKeys.map(k => `<th class="num">${k}</th>`).join('')}<th class="num">Total</th></tr></thead>
+          <tbody>${points.map(p => {
+            const total = allKeys.reduce((a, k) => a + (p.groups[k]?.cost ?? 0), 0);
+            return `<tr><td>${p.bucket}</td>${allKeys.map(k => `<td class="num cost">${usd(p.groups[k]?.cost ?? 0)}</td>`).join('')}<td class="num cost"><strong>${usd(total)}</strong></td></tr>`;
+          }).join('')}</tbody>
+        </table>` : '<p class="empty">—</p>';
+    }
+    $('#g').addEventListener('change', refresh);
+    $('#b').addEventListener('change', refresh);
+    refresh();
+    window.addEventListener('resize', () => chart?.resize());
+  </script>
+</Default>

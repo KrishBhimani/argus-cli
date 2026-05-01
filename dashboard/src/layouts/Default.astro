@@ -1,0 +1,58 @@
+---
+const { title = 'Argus' } = Astro.props;
+const path = Astro.url.pathname;
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <link rel="stylesheet" href="/styles/global.css" />
+</head>
+<body>
+  <header class="app-header">
+    <a href="/" class="brand">ARGUS<span class="dot">●</span></a>
+    <nav class="app-nav">
+      <a href="/" class={path === '/' ? 'active' : ''}>Overview</a>
+      <a href="/sessions" class={path.startsWith('/sessions') || path === '/session' ? 'active' : ''}>Sessions</a>
+      <a href="/trends" class={path === '/trends' ? 'active' : ''}>Trends</a>
+      <a href="/compare" class={path === '/compare' ? 'active' : ''}>Compare</a>
+      <a href="/settings" class={path === '/settings' ? 'active' : ''}>Settings</a>
+    </nav>
+  </header>
+  <main><slot /></main>
+  <footer class="app-footer" id="footer">
+    <span class="status-pill" id="ingest-status">Loading…</span>
+    <span style="margin: 0 0.8rem;">·</span>
+    <span id="pricing-info">Pricing —</span>
+  </footer>
+  <script>
+    async function refresh() {
+      try {
+        const [p, s] = await Promise.all([
+          fetch('/api/pricing').then(r => r.json()),
+          fetch('/api/ingest/status').then(r => r.json()),
+        ]);
+        const pf = document.getElementById('pricing-info');
+        if (pf) pf.innerHTML = `Pricing v<code>${p.version}</code> — run <code>argus pricing refresh</code> to update`;
+        const ip = document.getElementById('ingest-status');
+        if (ip) {
+          if (s.foregroundComplete && s.pending === 0) {
+            ip.textContent = `Indexed ${s.processed} sessions`;
+            ip.classList.remove('busy');
+          } else if (!s.foregroundComplete) {
+            ip.textContent = `Ingesting recent... ${s.processed}/${s.total}`;
+            ip.classList.add('busy');
+          } else {
+            ip.textContent = `Backfilling history... ${s.processed}/${s.total}`;
+            ip.classList.add('busy');
+          }
+        }
+      } catch (e) { /* server may not be live yet */ }
+    }
+    refresh();
+    setInterval(refresh, 4000);
+  </script>
+</body>
+</html>
