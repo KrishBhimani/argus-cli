@@ -1,8 +1,5 @@
 node_modules/
 dist/
-dashboard-dist/
-dashboard/dist/
-dashboard/.astro/
 *.log
 .env
 .env.local

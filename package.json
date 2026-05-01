@@ -16,13 +16,13 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && npm run build:dashboard",
-    "build:dashboard": "cd dashboard && npm run build && cp -r dist ../dashboard-dist",
-    "dev": "tsx watch src/cli.ts start",
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts start",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.1",
     "better-sqlite3": "^11.10.0",
     "chokidar": "^4.0.3",
     "commander": "^12.1.0",

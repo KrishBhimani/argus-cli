@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Argus</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; margin: 0; background: #0d1117; color: #e6edf3; }
+    header { padding: 1rem 2rem; border-bottom: 1px solid #21262d; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { margin: 0; font-size: 1.1rem; letter-spacing: 0.05em; color: #f0883e; }
+    nav a { color: #7ee787; margin-left: 1.5rem; text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+    main { padding: 2rem; max-width: 1100px; margin: 0 auto; }
+    .hero { text-align: center; margin: 2rem 0 3rem; }
+    .hero select { background: #161b22; color: #e6edf3; border: 1px solid #30363d; padding: 0.4rem 0.8rem; border-radius: 6px; margin-bottom: 1rem; }
+    .hero h2 { font-size: 4.5rem; margin: 0.3rem 0; font-weight: 600; color: #f0883e; }
+    .hero p { color: #8b949e; margin: 0; }
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; margin-bottom: 2rem; }
+    .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 1.2rem; }
+    .card h3 { margin: 0 0 1rem; font-size: 0.85rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.06em; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #21262d; font-size: 0.9rem; }
+    th { color: #8b949e; font-weight: 500; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+    tbody tr:hover { background: #161b22; }
+    a { color: #58a6ff; }
+    footer { padding: 1rem 2rem; color: #6e7681; font-size: 0.8rem; text-align: center; border-top: 1px solid #21262d; margin-top: 4rem; }
+    .agent-bar { background: #21262d; height: 28px; border-radius: 4px; overflow: hidden; display: flex; }
+    .agent-bar > div { padding: 4px 8px; font-size: 0.8rem; color: #fff; }
+    .claude { background: #f0883e; }
+    .codex { background: #58a6ff; }
+    .heatmap { display: grid; grid-template-columns: repeat(31, 1fr); gap: 2px; }
+    .heat-cell { aspect-ratio: 1; border-radius: 2px; background: #161b22; }
+    pre { background: #0d1117; border: 1px solid #21262d; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ARGUS</h1>
+    <nav>
+      <a href="#" data-view="overview">Overview</a>
+      <a href="#" data-view="sessions">Sessions</a>
+      <a href="#" data-view="trends">Trends</a>
+      <a href="#" data-view="compare">Compare</a>
+      <a href="#" data-view="settings">Settings</a>
+    </nav>
+  </header>
+  <main id="root"></main>
+  <footer id="pricing-footer">—</footer>
+
+<script type="module">
+const $ = (sel) => document.querySelector(sel);
+const root = $('#root');
+const fmtUsd = (n) => '$' + (n ?? 0).toFixed(2);
+const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n)) + ' tokens';
+
+const views = { overview: renderOverview, sessions: renderSessions, trends: renderTrends, compare: renderCompare, settings: renderSettings };
+
+document.querySelectorAll('nav a').forEach(a => a.addEventListener('click', (e) => {
+  e.preventDefault();
+  const v = a.dataset.view;
+  history.replaceState(null, '', '#' + v);
+  views[v]();
+}));
+
+async function renderOverview() {
+  root.innerHTML = `
+    <section class="hero">
+      <select id="window">
+        <option value="today">Today</option>
+        <option value="7d" selected>Last 7 days</option>
+        <option value="30d">Last 30 days</option>
+        <option value="all">All time</option>
+      </select>
+      <h2 id="hero-cost">$—</h2>
+      <p><span id="hero-tokens">—</span> &middot; <span id="hero-sessions">—</span></p>
+    </section>
+    <section class="grid">
+      <div class="card"><h3>Cost over time</h3><div id="line-chart"></div></div>
+      <div class="card"><h3>By agent</h3><div id="agent-split"></div></div>
+    </section>
+    <section class="card">
+      <h3>Daily heatmap (last 90 days)</h3>
+      <div id="heatmap" class="heatmap"></div>
+    </section>
+  `;
+  const sel = $('#window');
+  sel.addEventListener('change', refresh);
+  await refresh();
+  async function refresh() {
+    const data = await (await fetch('/api/overview?window=' + sel.value)).json();
+    $('#hero-cost').textContent = fmtUsd(data.total_cost_usd);
+    $('#hero-tokens').textContent = fmtTok(data.total_tokens);
+    $('#hero-sessions').textContent = data.session_count + ' sessions';
+    const days = Object.entries(data.cost_by_day).sort();
+    $('#line-chart').innerHTML = renderLine(days);
+    $('#agent-split').innerHTML = renderAgentBar(data.agent_split);
+    $('#heatmap').innerHTML = renderHeatmap(days);
+  }
+}
+
+function renderLine(days) {
+  if (days.length === 0) return '<p style="color:#6e7681;">No data in this window.</p>';
+  const max = Math.max(...days.map(([_, v]) => v));
+  return `<div style="display:flex;align-items:flex-end;height:160px;gap:2px;">
+    ${days.map(([d, v]) => `<div title="${d}: ${fmtUsd(v)}" style="flex:1;background:#f0883e;height:${max ? Math.max(2, (v/max)*150) : 2}px;border-radius:2px;"></div>`).join('')}
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:0.4rem;color:#6e7681;font-size:0.75rem;">
+    <span>${days[0][0]}</span><span>${days[days.length - 1][0]}</span>
+  </div>`;
+}
+
+function renderAgentBar(split) {
+  const total = Object.values(split).reduce((a, v) => a + v.cost, 0);
+  if (total === 0) return '<p style="color:#6e7681;">No data.</p>';
+  const items = Object.entries(split).map(([k, v]) => {
+    const pct = (v.cost / total) * 100;
+    const cls = k === 'claude_code' ? 'claude' : 'codex';
+    return `<div class="${cls}" style="width:${pct}%">${k} ${fmtUsd(v.cost)}</div>`;
+  }).join('');
+  return `<div class="agent-bar">${items}</div>
+  <div style="margin-top:1rem;color:#8b949e;font-size:0.85rem;">
+    ${Object.entries(split).map(([k, v]) => `<div>${k}: ${v.sessions} sessions, ${fmtTok(v.tokens)}</div>`).join('')}
+  </div>`;
+}
+
+function renderHeatmap(days) {
+  const lookup = Object.fromEntries(days);
+  const today = new Date();
+  const cells = [];
+  const max = Math.max(0.01, ...days.map(([_, v]) => v));
+  for (let i = 89; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 86400000);
+    const key = d.toISOString().slice(0, 10);
+    const v = lookup[key] ?? 0;
+    const intensity = v / max;
+    const bg = v > 0 ? `rgba(240,136,62,${0.2 + intensity * 0.8})` : '#161b22';
+    cells.push(`<div class="heat-cell" title="${key}: ${fmtUsd(v)}" style="background:${bg};"></div>`);
+  }
+  return cells.join('');
+}
+
+async function renderSessions() {
+  root.innerHTML = `<h2>Sessions</h2>
+    <div class="card"><table id="t"><thead><tr><th>Date</th><th>Agent</th><th>Project</th><th>Model</th><th>Tokens</th><th>Cost</th><th></th></tr></thead><tbody></tbody></table></div>`;
+  const { sessions } = await (await fetch('/api/sessions?limit=200')).json();
+  const tbody = $('#t tbody');
+  if (sessions.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="color:#6e7681;">No sessions yet.</td></tr>'; return; }
+  tbody.innerHTML = sessions.map(s => `
+    <tr>
+      <td>${s.started_at.slice(0, 16).replace('T', ' ')}</td>
+      <td>${s.agent}</td>
+      <td style="font-family:monospace;font-size:0.8rem;">${s.project_path}</td>
+      <td>${s.primary_model}</td>
+      <td>${(s.total_fresh_input_tokens + s.total_output_tokens).toLocaleString()}</td>
+      <td>${fmtUsd(s.total_cost_usd)}</td>
+      <td><a href="#" data-id="${encodeURIComponent(s.id)}">view</a></td>
+    </tr>
+  `).join('');
+  tbody.addEventListener('click', (e) => {
+    const a = e.target.closest('a[data-id]');
+    if (!a) return;
+    e.preventDefault();
+    renderSessionDetail(decodeURIComponent(a.dataset.id));
+  });
+}
+
+async function renderSessionDetail(id) {
+  const r = await fetch('/api/sessions/' + encodeURIComponent(id));
+  if (!r.ok) { root.innerHTML = '<p>Session not found.</p>'; return; }
+  const { session, turns } = await r.json();
+  root.innerHTML = `
+    <h2>${session.agent} &middot; ${session.project_path}</h2>
+    <div class="card">
+      <pre>${JSON.stringify({
+        started: session.started_at, ended: session.ended_at,
+        primary_model: session.primary_model, turns: session.turn_count,
+        cost: fmtUsd(session.total_cost_usd), version: session.agent_version,
+        sub_agents: session.metadata?.sub_agent_session_ids,
+      }, null, 2)}</pre>
+    </div>
+    <h3>Turns</h3>
+    <div class="card"><table>
+      <thead><tr><th>#</th><th>Time</th><th>Model</th><th>Fresh in</th><th>Cache read</th><th>Output</th><th>Tools</th><th>Cost</th></tr></thead>
+      <tbody>${turns.map((t, i) => `
+        <tr><td>${i}</td><td>${t.timestamp.slice(11, 19)}</td><td>${t.model}</td>
+          <td>${t.fresh_input_tokens.toLocaleString()}</td><td>${t.cache_read_tokens.toLocaleString()}</td>
+          <td>${t.output_tokens.toLocaleString()}</td><td>${t.tool_calls_count}</td>
+          <td>${fmtUsd(t.cost_usd)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <p><a href="#" id="back">&larr; Back to sessions</a></p>
+  `;
+  $('#back').addEventListener('click', (e) => { e.preventDefault(); renderSessions(); });
+}
+
+async function renderTrends() {
+  root.innerHTML = `<h2>Trends</h2>
+    <div class="card">
+      <select id="g"><option>day</option><option>week</option><option>month</option></select>
+      <select id="b"><option>agent</option><option>model</option></select>
+      <div id="trends-out" style="margin-top:1rem;"></div>
+    </div>`;
+  const refresh = async () => {
+    const r = await fetch(`/api/trends?granularity=${$('#g').value}&groupBy=${$('#b').value}`);
+    const { points } = await r.json();
+    if (!points.length) { $('#trends-out').innerHTML = '<p style="color:#6e7681;">No data.</p>'; return; }
+    const allKeys = [...new Set(points.flatMap(p => Object.keys(p.groups)))];
+    const max = Math.max(...points.flatMap(p => allKeys.map(k => p.groups[k]?.cost ?? 0)));
+    $('#trends-out').innerHTML = `
+      <table style="width:100%;">
+        <thead><tr><th>Bucket</th>${allKeys.map(k => `<th>${k}</th>`).join('')}</tr></thead>
+        <tbody>${points.map(p => `<tr><td>${p.bucket}</td>${allKeys.map(k => `<td>${fmtUsd(p.groups[k]?.cost ?? 0)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>`;
+  };
+  $('#g').addEventListener('change', refresh);
+  $('#b').addEventListener('change', refresh);
+  refresh();
+}
+
+async function renderCompare() {
+  root.innerHTML = `<h2>Compare</h2>
+    <div class="card"><select id="cw"><option>7d</option><option>30d</option><option>all</option></select></div>
+    <div id="cards" class="grid" style="margin-top:1.5rem;"></div>
+    <p style="color:#6e7681;font-size:0.85rem;margin-top:1rem;">
+      OpenAI caches prompts automatically and does not bill or report cache writes, so OpenAI sessions show 0 cache writes.
+      Cache hits are also not directly comparable: OpenAI's automatic cache makes hits common and incidental,
+      while Anthropic's hits reflect intentional <code>cache_control</code> placement.
+    </p>`;
+  const refresh = async () => {
+    const { agent_split } = await (await fetch('/api/overview?window=' + $('#cw').value)).json();
+    $('#cards').innerHTML = ['claude_code', 'codex'].map(a => {
+      const v = agent_split[a] ?? { cost: 0, sessions: 0, tokens: 0 };
+      return `<div class="card"><h3>${a}</h3>
+        <p>Cost: <strong>${fmtUsd(v.cost)}</strong></p>
+        <p>Sessions: ${v.sessions}</p>
+        <p>Tokens: ${v.tokens.toLocaleString()}</p>
+        <p>Avg cost/session: ${fmtUsd(v.sessions ? v.cost / v.sessions : 0)}</p>
+      </div>`;
+    }).join('');
+  };
+  $('#cw').addEventListener('change', refresh);
+  refresh();
+}
+
+async function renderSettings() {
+  const p = await (await fetch('/api/pricing')).json();
+  const e = await (await fetch('/api/parse-errors')).json();
+  const s = await (await fetch('/api/ingest/status')).json();
+  root.innerHTML = `<h2>Settings</h2>
+    <div class="card"><h3>Pricing</h3>
+      <p>Pricing table version: <code>${p.version}</code></p>
+      <p>To refresh: <code>argus pricing refresh</code></p>
+    </div>
+    <div class="card"><h3>Ingest status</h3><pre>${JSON.stringify(s, null, 2)}</pre></div>
+    <div class="card"><h3>Export</h3>
+      <p><a href="/api/export.json" download>Download JSON</a> &middot; <a href="/api/export.csv" download>Download CSV</a></p>
+    </div>
+    <div class="card"><h3>Parse errors (recent)</h3>
+      <pre>${e.errors.length ? JSON.stringify(e.errors, null, 2) : 'None.'}</pre>
+    </div>
+    <div class="card"><h3>Wipe</h3>
+      <p>Run <code>argus wipe</code> to delete all Argus data. Cannot be undone from the dashboard.</p>
+    </div>`;
+}
+
+async function loadPricingFooter() {
+  const p = await (await fetch('/api/pricing')).json();
+  $('#pricing-footer').textContent = `Cost computed using pricing table v${p.version} — \`argus pricing refresh\` to update.`;
+}
+
+const initialView = (location.hash.slice(1) || 'overview');
+(views[initialView] || views.overview)();
+loadPricingFooter();
+</script>
+</body>
+</html>
