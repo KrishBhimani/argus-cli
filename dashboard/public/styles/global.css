@@ -173,24 +173,24 @@ th .est { color: var(--text-2); font-weight: 400; text-transform: none; letter-s
 .hero-controls { margin-bottom: 1.5rem; display: flex; justify-content: center; gap: 0.6rem; align-items: center; }
 .hero-box {
   display: inline-block;
-  padding: 2.4rem 3.5rem 1.6rem;
+  padding: 1.5rem 2.4rem 1.1rem;
   background: var(--bg-1);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 12px;
   box-shadow: var(--shadow);
-  margin: 0.5rem 0 0.6rem;
+  margin: 0.4rem 0 0.5rem;
   position: relative;
 }
 .hero-box::before {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: 16px;
-  background: radial-gradient(ellipse at top, rgba(240, 136, 62, 0.08), transparent 70%);
+  border-radius: 12px;
+  background: radial-gradient(ellipse at top, rgba(240, 136, 62, 0.07), transparent 70%);
   pointer-events: none;
 }
-.hero-tokens { font-size: 5rem; font-weight: 700; line-height: 1; color: var(--accent); margin: 0; font-variant-numeric: tabular-nums; position: relative; }
-.hero-tokens-label { color: var(--text-2); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.18em; margin-top: 0.6rem; position: relative; }
+.hero-tokens { font-size: 3.5rem; font-weight: 700; line-height: 1; color: var(--accent); margin: 0; font-variant-numeric: tabular-nums; position: relative; }
+.hero-tokens-label { color: var(--text-2); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.16em; margin-top: 0.45rem; position: relative; }
 .hero-sub { color: var(--text-1); font-size: 1rem; margin-top: 1.2rem; }
 .hero-sub strong { color: var(--text-0); font-weight: 600; }
 .hero-sub .est-note { color: var(--text-2); font-size: 0.85rem; }
