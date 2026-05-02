@@ -91,10 +91,12 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
   // local-timezone hour-of-day skew.
   const now = new Date();
   const todayUtcMidnightMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  // [weekIdx, dayOfWeek, cost, dateKey] — the dateKey is stored directly so the tooltip
-  // doesn't have to reverse-derive it from cell coords (the previous reverse formula was
-  // buggy and produced wrong dates).
-  const cells: [number, number, number, string][] = [];
+  const cells: [number, number, number][] = [];
+  // Side-map from (weekIdx,dayOfWeek) -> ISO date so the tooltip doesn't have to
+  // reverse-derive it from cell coords. The previous reverse formula was buggy and
+  // produced wrong dates for almost every cell. ECharts cell data must remain a
+  // 3-tuple [x, y, value] or it conflicts with the heatmap series' default dimensions.
+  const cellDate = new Map<string, string>();
   let max = 0;
   for (let i = lookbackDays - 1; i >= 0; i--) {
     const dayMs = todayUtcMidnightMs - i * 86_400_000;
@@ -104,7 +106,8 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
     if (v > max) max = v;
     const dayOfWeek = d.getUTCDay();
     const weekIdx = Math.floor((lookbackDays - 1 - i) / 7);
-    cells.push([weekIdx, dayOfWeek, +v.toFixed(4), key]);
+    cells.push([weekIdx, dayOfWeek, +v.toFixed(4)]);
+    cellDate.set(`${weekIdx}-${dayOfWeek}`, key);
   }
   const weeks = Math.ceil(lookbackDays / 7);
   c.setOption({
@@ -112,8 +115,10 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
     tooltip: {
       ...THEME.tooltip,
       formatter: (p: any) => {
+        const wk = p.data[0];
+        const dow = p.data[1];
         const v = p.data[2];
-        const key = p.data[3];
+        const key = cellDate.get(`${wk}-${dow}`) ?? '';
         return `${key}<br>${v > 0 ? '~$' + v.toFixed(2) : '<span style="color:#6b7585;">no activity</span>'}`;
       },
     },
