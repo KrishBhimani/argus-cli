@@ -74,12 +74,13 @@ are backfilled from existing TEXT timestamps as part of the migration.
 
 ```sql
 CREATE TABLE tool_calls (
-  id              TEXT PRIMARY KEY,            -- composite: "{session_id}:{turn_index}:{block_index}"
-                                               -- where block_index is the position of this
-                                               -- tool_use block inside the assistant message's
-                                               -- content[] array (0-based)
+  id              TEXT PRIMARY KEY,            -- composite: "{session_id}:{tool_use_id}"
+                                               -- tool_use_id is assigned by Claude per
+                                               -- block and is stable across tail re-ingests,
+                                               -- so repeated reads upsert in place.
   session_id      TEXT NOT NULL,
-  turn_index      INTEGER NOT NULL,            -- the assistant turn this tool call belongs to
+  turn_index      INTEGER NOT NULL,            -- 0-based ordering hint within the batch
+                                               -- (informational only, not part of the key)
   tool_name       TEXT NOT NULL,               -- e.g. "Bash", "Edit", "mcp__context7__query-docs"
   is_error        INTEGER NOT NULL DEFAULT 0,  -- from the matching tool_result.is_error
   input_size      INTEGER NOT NULL DEFAULT 0,  -- JSON.stringify(block.input).length

@@ -2,11 +2,28 @@ import { basename } from 'node:path';
 import type { Adapter } from '../adapters/adapter.js';
 import type { Repository } from '../store/repository.js';
 import type { PricingTable } from '../pricing/types.js';
-import type { Session } from '../schema/types.js';
+import type { Session, ToolCall } from '../schema/types.js';
+import type { RawToolCall } from '../adapters/claude_code/extract_tool_calls.js';
 import { buildSession, buildTurn } from './aggregate.js';
 import { rollupSubAgents } from './rollup_subagents.js';
 import { ingestClaudeCodeFile } from '../adapters/claude_code/ingest_file.js';
 import { subAgentFilesFor } from '../adapters/claude_code/discover.js';
+
+// Map adapter-local RawToolCall → persisted ToolCall. Composite id uses
+// tool_use_id (stable per Claude assignment) so repeated tail ingests of
+// the same bytes upsert in place rather than duplicate.
+function toToolCall(r: RawToolCall, sessionId: string): ToolCall {
+  return {
+    id: `${sessionId}:${r.tool_use_id}`,
+    session_id: sessionId,
+    turn_index: r.turn_index,
+    tool_name: r.tool_name,
+    is_error: r.is_error,
+    input_size: r.input_size,
+    subagent_type: r.subagent_type,
+    timestamp: r.timestamp,
+  };
+}
 
 export async function ingestFile(adapter: Adapter, filePath: string, repo: Repository, table: PricingTable): Promise<void> {
   const fromOffset = repo.getFileOffset(filePath);
@@ -29,14 +46,20 @@ export async function ingestFile(adapter: Adapter, filePath: string, repo: Repos
 
   const sessionId = `${result.header.agent}:${result.header.native_session_id}`;
 
-  // Ensure a session row exists (FK target for turns). Stub with header only;
-  // we'll recompute totals below from the full turn set.
+  // Ensure a session row exists (FK target for turns and tool_calls). Stub
+  // with header only; we'll recompute totals below from the full turn set.
   if (!repo.getSession(sessionId)) {
     repo.upsertSession(buildSession(result.header, sessionId, [], table.version));
   }
 
   // Upsert any new turns from this read.
   for (const raw of result.turns) repo.upsertTurn(buildTurn(raw, sessionId, table));
+
+  // Upsert any new tool_calls from this read. Adapters that don't emit
+  // tool_calls leave the field undefined; treat as empty.
+  if (result.tool_calls && result.tool_calls.length) {
+    repo.upsertToolCalls(result.tool_calls.map(r => toToolCall(r, sessionId)));
+  }
 
   // Sub-agents: each sub-agent JSONL becomes its own session under <sessionId>/<filename>.
   let subSessions: Session[] = [];
@@ -53,6 +76,9 @@ export async function ingestFile(adapter: Adapter, filePath: string, repo: Repos
         repo.upsertSession(buildSession(subResult.result.header, subSessionId, [], table.version));
       }
       for (const raw of subResult.result.turns) repo.upsertTurn(buildTurn(raw, subSessionId, table));
+      if (subResult.result.tool_calls && subResult.result.tool_calls.length) {
+        repo.upsertToolCalls(subResult.result.tool_calls.map(r => toToolCall(r, subSessionId)));
+      }
 
       // Recompute the sub-session totals from the FULL set of stored turns.
       const existingSub = repo.getSession(subSessionId);

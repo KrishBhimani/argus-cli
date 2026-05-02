@@ -90,4 +90,58 @@ describe('Repository', () => {
     const errs = repo.recentParseErrors(10);
     expect(errs).toHaveLength(1);
   });
+
+  it('upserts tool_calls and aggregates the leaderboard', () => {
+    repo.upsertSession(SESSION);
+    repo.upsertToolCalls([
+      { id: 'claude_code:s1:t1', session_id: SESSION.id, turn_index: 0, tool_name: 'Bash', is_error: 0, input_size: 10, subagent_type: null, timestamp: '2026-05-01T10:00:00Z' },
+      { id: 'claude_code:s1:t2', session_id: SESSION.id, turn_index: 0, tool_name: 'Bash', is_error: 1, input_size: 20, subagent_type: null, timestamp: '2026-05-01T10:01:00Z' },
+      { id: 'claude_code:s1:t3', session_id: SESSION.id, turn_index: 1, tool_name: 'Edit', is_error: 0, input_size: 30, subagent_type: null, timestamp: '2026-05-01T10:02:00Z' },
+    ]);
+    const board = repo.toolLeaderboard('', 10);
+    expect(board.find(r => r.name === 'Bash')?.calls).toBe(2);
+    expect(board.find(r => r.name === 'Bash')?.errors).toBe(1);
+    expect(board.find(r => r.name === 'Edit')?.calls).toBe(1);
+
+    // Idempotent re-upsert with same ids does not duplicate
+    repo.upsertToolCalls([
+      { id: 'claude_code:s1:t1', session_id: SESSION.id, turn_index: 0, tool_name: 'Bash', is_error: 0, input_size: 10, subagent_type: null, timestamp: '2026-05-01T10:00:00Z' },
+    ]);
+    expect(repo.countToolCallsForSession(SESSION.id)).toBe(3);
+  });
+
+  it('finds session matching a prompt by project + timestamp range', () => {
+    repo.upsertSession(SESSION); // started 10:00, ended 11:00, project=/proj
+    const inside = repo.linkPromptToSession('/proj', Date.parse('2026-05-01T10:30:00Z'));
+    expect(inside).toBe(SESSION.id);
+
+    const before = repo.linkPromptToSession('/proj', Date.parse('2026-05-01T09:00:00Z'));
+    expect(before).toBeNull();
+
+    const wrongProject = repo.linkPromptToSession('/elsewhere', Date.parse('2026-05-01T10:30:00Z'));
+    expect(wrongProject).toBeNull();
+  });
+
+  it('subagent rollup picks up Task tool calls only', () => {
+    repo.upsertSession(SESSION);
+    repo.upsertToolCalls([
+      { id: 'claude_code:s1:a', session_id: SESSION.id, turn_index: 0, tool_name: 'Task', is_error: 0, input_size: 50, subagent_type: 'Explore', timestamp: '2026-05-01T10:00:00Z' },
+      { id: 'claude_code:s1:b', session_id: SESSION.id, turn_index: 1, tool_name: 'Task', is_error: 0, input_size: 50, subagent_type: 'Plan',    timestamp: '2026-05-01T10:01:00Z' },
+      { id: 'claude_code:s1:c', session_id: SESSION.id, turn_index: 2, tool_name: 'Bash', is_error: 0, input_size: 5,  subagent_type: null,     timestamp: '2026-05-01T10:02:00Z' },
+    ]);
+    const sub = repo.subagentCalls('');
+    expect(sub.map(s => s.type).sort()).toEqual(['Explore', 'Plan']);
+    expect(sub.find(s => s.type === 'Explore')?.calls).toBe(1);
+  });
+
+  it('inserts prompts and FTS search returns matches with snippet markers', () => {
+    repo.insertPrompts([
+      { timestamp_ms: 1000, project_path: '/p', display: 'how do I configure vitest', pasted_chars: 0, is_slash: 0 },
+      { timestamp_ms: 2000, project_path: '/p', display: 'unrelated', pasted_chars: 0, is_slash: 0 },
+      { timestamp_ms: 3000, project_path: '/p', display: 'vitest hangs', pasted_chars: 0, is_slash: 0 },
+    ]);
+    const r = repo.searchPrompts({ q: 'vitest', limit: 10 });
+    expect(r.total).toBe(2);
+    expect(r.rows.every(row => row.snippet.includes('<mark>'))).toBe(true);
+  });
 });

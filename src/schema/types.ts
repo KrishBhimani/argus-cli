@@ -63,3 +63,29 @@ export interface RawSessionHeader {
   agent_reported_cost_usd: number | null;
   metadata: Record<string, unknown>;
 }
+
+// Slice 1 (Tools page) — one row per tool_use block in any assistant turn.
+// Composite id is `${session_id}:${turn_index}:${block_index}` so the same
+// tool_use can be re-emitted on tail re-ingest without duplicating.
+export interface ToolCall {
+  id: string;
+  session_id: string;
+  turn_index: number;
+  tool_name: string;
+  is_error: 0 | 1;
+  input_size: number;
+  subagent_type: string | null;
+  timestamp: string;
+}
+
+// Slice 1 (Prompts page) — one row per line of ~/.claude/history.jsonl.
+// `display` is capped at 8 KB on ingest; `pasted_chars` is the JSON-stringified
+// length of pastedContents (cheap upper bound, not the indexed body).
+export interface Prompt {
+  id: number;
+  timestamp_ms: number;
+  project_path: string;
+  display: string;
+  pasted_chars: number;
+  is_slash: 0 | 1;
+}

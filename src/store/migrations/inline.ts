@@ -63,3 +63,68 @@ CREATE TABLE IF NOT EXISTS app_meta (
   value TEXT NOT NULL
 );
 `;
+
+// MIGRATION_002 — Slice 1 (Tools + Prompts).
+//   * Adds tool_calls table (one row per tool_use block in any assistant turn).
+//   * Adds prompts table sourced from ~/.claude/history.jsonl, plus a
+//     prompts_fts virtual table for full-text search.
+//   * Adds started_at_ms / ended_at_ms denormalized columns on sessions so the
+//     prompt → session linkage join is a fast indexed range scan instead of
+//     a per-row TEXT parse.
+//
+// ALTER TABLE in SQLite has no IF NOT EXISTS form, so we gate this migration
+// on a schema_version key in app_meta — see openDb in ../db.ts.
+export const MIGRATION_002 = `
+ALTER TABLE sessions ADD COLUMN started_at_ms INTEGER;
+ALTER TABLE sessions ADD COLUMN ended_at_ms INTEGER;
+CREATE INDEX IF NOT EXISTS idx_sessions_time ON sessions(project_path, started_at_ms, ended_at_ms);
+
+UPDATE sessions
+SET started_at_ms = CAST(strftime('%s', started_at) AS INTEGER) * 1000,
+    ended_at_ms = CASE WHEN ended_at IS NULL OR ended_at = '' THEN NULL
+                       ELSE CAST(strftime('%s', ended_at) AS INTEGER) * 1000 END
+WHERE started_at_ms IS NULL;
+
+CREATE TABLE IF NOT EXISTS tool_calls (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  turn_index INTEGER NOT NULL,
+  tool_name TEXT NOT NULL,
+  is_error INTEGER NOT NULL DEFAULT 0,
+  input_size INTEGER NOT NULL DEFAULT 0,
+  subagent_type TEXT,
+  timestamp TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_name ON tool_calls(tool_name);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_ts ON tool_calls(timestamp);
+
+CREATE TABLE IF NOT EXISTS prompts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp_ms INTEGER NOT NULL,
+  project_path TEXT NOT NULL,
+  display TEXT NOT NULL,
+  pasted_chars INTEGER NOT NULL DEFAULT 0,
+  is_slash INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_prompts_ts ON prompts(timestamp_ms);
+CREATE INDEX IF NOT EXISTS idx_prompts_project ON prompts(project_path);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS prompts_fts USING fts5(
+  display,
+  content='prompts',
+  content_rowid='id',
+  tokenize='unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS prompts_ai AFTER INSERT ON prompts BEGIN
+  INSERT INTO prompts_fts(rowid, display) VALUES (new.id, new.display);
+END;
+CREATE TRIGGER IF NOT EXISTS prompts_ad AFTER DELETE ON prompts BEGIN
+  INSERT INTO prompts_fts(prompts_fts, rowid, display) VALUES('delete', old.id, old.display);
+END;
+CREATE TRIGGER IF NOT EXISTS prompts_au AFTER UPDATE ON prompts BEGIN
+  INSERT INTO prompts_fts(prompts_fts, rowid, display) VALUES('delete', old.id, old.display);
+  INSERT INTO prompts_fts(rowid, display) VALUES (new.id, new.display);
+END;
+`;

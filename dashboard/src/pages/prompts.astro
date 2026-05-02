@@ -1,0 +1,193 @@
+---
+import Default from '../layouts/Default.astro';
+---
+<Default title="Argus — Prompts">
+  <h2>Prompt history</h2>
+  <div class="card" style="margin-bottom:1rem;display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
+    <input id="q" type="text" placeholder="Search every prompt you've typed…"
+           style="flex:1;min-width:240px;background:var(--bg-2);color:var(--text-0);
+                  border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.8rem;
+                  font-size:0.95rem;font-family:inherit;outline:none;" />
+    <select id="proj">
+      <option value="">All projects</option>
+    </select>
+    <label style="display:inline-flex;gap:0.4rem;align-items:center;font-size:0.8rem;color:var(--text-1);cursor:pointer;">
+      <input id="slash" type="checkbox" style="cursor:pointer;" />
+      Show slash commands
+    </label>
+  </div>
+
+  <div id="stats-strip" class="card" style="margin-bottom:1rem;display:none;
+    color:var(--text-2);font-size:0.85rem;text-align:center;padding:0.7rem 1rem;"></div>
+
+  <div id="results"></div>
+
+  <style>
+    .prompt-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.9rem 1.1rem;
+      margin-bottom: 0.7rem;
+      transition: border-color 0.12s;
+    }
+    .prompt-card:hover { border-color: var(--accent); }
+    .prompt-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      font-size: 0.78rem;
+      color: var(--text-2);
+      margin-bottom: 0.4rem;
+    }
+    .prompt-meta .proj { font-family: 'SF Mono', Consolas, monospace; color: var(--text-1); }
+    .prompt-snippet {
+      font-size: 0.92rem;
+      color: var(--text-0);
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+    .prompt-snippet mark {
+      background: rgba(240, 136, 62, 0.28);
+      color: var(--text-0);
+      padding: 0 1px;
+      border-radius: 2px;
+    }
+    .prompt-actions {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+    }
+    .prompt-actions a { color: var(--accent); }
+    .prompt-actions .nolink { color: var(--text-2); font-style: italic; }
+    .pasted-tag {
+      display: inline-block;
+      background: var(--bg-2);
+      color: var(--text-2);
+      padding: 0.05em 0.5em;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      margin-left: 0.5rem;
+    }
+  </style>
+
+  <script>
+    import { api, type PromptHit } from '../scripts/api';
+    import { ago } from '../scripts/format';
+
+    const $ = (s: string) => document.querySelector(s) as HTMLElement;
+    const qInput = $('#q') as HTMLInputElement;
+    const projSelect = $('#proj') as HTMLSelectElement;
+    const slashCheckbox = $('#slash') as HTMLInputElement;
+
+    // History.jsonl is a Windows path or POSIX path normalized to forward
+    // slashes. The basename (after the final /) is the friendly project
+    // name to display.
+    function projectBasename(p: string): string {
+      if (!p) return '—';
+      const parts = p.split('/');
+      return parts[parts.length - 1] || p;
+    }
+
+    function bytesHuman(n: number): string {
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / 1024 / 1024).toFixed(1) + ' MB';
+    }
+
+    // Escape user-controlled text. The snippet from the server is already
+    // safe — FTS5 emits literal <mark>…</mark> around match terms, no other
+    // HTML — so we render it as-is. Plain display goes through textContent
+    // (set via innerText assignment) when there's no query.
+    function escapeHtml(s: string): string {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // Strip everything except <mark> and </mark> from a server-supplied
+    // snippet. Defense-in-depth: if a future server change ever leaks raw
+    // HTML through snippet(), the page won't render it.
+    function safeSnippet(s: string): string {
+      // Replace <mark> and </mark> with sentinels, escape, then restore.
+      const open = '\x00MK_OPEN\x00';
+      const close = '\x00MK_CLOSE\x00';
+      const stripped = s.replace(/<mark>/g, open).replace(/<\/mark>/g, close);
+      return escapeHtml(stripped).replace(new RegExp(open, 'g'), '<mark>').replace(new RegExp(close, 'g'), '</mark>');
+    }
+
+    function renderResults(prompts: PromptHit[]) {
+      if (prompts.length === 0) {
+        $('#results').innerHTML = qInput.value
+          ? '<div class="empty">No prompts match this search.</div>'
+          : '<div class="empty">No prompts indexed yet. Use Claude Code and they\'ll appear here.</div>';
+        return;
+      }
+      $('#results').innerHTML = prompts.map(p => `
+        <div class="prompt-card">
+          <div class="prompt-meta">
+            <span>${ago(new Date(p.timestamp_ms).toISOString())} · <span class="proj">${escapeHtml(projectBasename(p.project_path))}</span></span>
+            <span>${p.pasted_chars > 0 ? `<span class="pasted-tag">+ ${bytesHuman(p.pasted_chars)} pasted</span>` : ''}</span>
+          </div>
+          <div class="prompt-snippet">${safeSnippet(p.snippet)}</div>
+          <div class="prompt-actions">
+            ${p.session_id
+              ? `<a href="/session?id=${encodeURIComponent(p.session_id)}">→ Open session</a>`
+              : `<span class="nolink">(no linked session)</span>`}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function loadStats() {
+      try {
+        const stats = await api.promptStats();
+        const strip = $('#stats-strip');
+        if (stats.total === 0) {
+          strip.style.display = 'none';
+        } else {
+          const oldest = stats.oldest_ms ? new Date(stats.oldest_ms).toLocaleDateString() : '—';
+          strip.style.display = '';
+          strip.textContent = `${stats.total.toLocaleString()} prompts · ${stats.projects} projects · oldest ${oldest}`;
+        }
+      } catch { /* ignore */ }
+    }
+
+    async function loadProjects() {
+      try {
+        const { projects } = await api.promptProjects();
+        for (const p of projects) {
+          const opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = projectBasename(p);
+          projSelect.appendChild(opt);
+        }
+      } catch { /* ignore */ }
+    }
+
+    let debounceTimer: any;
+    async function refresh() {
+      const q = qInput.value.trim();
+      const project = projSelect.value || undefined;
+      const includeSlash = slashCheckbox.checked;
+
+      // Hide stats strip whenever a query or project filter is active —
+      // they only make sense for the unfiltered view.
+      $('#stats-strip').style.display = (q || project) ? 'none' : '';
+
+      const { prompts } = await api.prompts({ q, limit: 50, project, includeSlash });
+      renderResults(prompts);
+    }
+
+    function refreshDebounced() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(refresh, 150);
+    }
+
+    qInput.addEventListener('input', refreshDebounced);
+    projSelect.addEventListener('change', refresh);
+    slashCheckbox.addEventListener('change', refresh);
+
+    loadStats();
+    loadProjects();
+    refresh();
+  </script>
+</Default>

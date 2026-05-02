@@ -1,8 +1,9 @@
 import { open } from 'node:fs/promises';
 import { basename } from 'node:path';
-import { AssistantLineSchema, type AssistantLine } from './schemas.js';
+import { AssistantLineSchema, UserLineSchema, type AssistantLine, type UserLine } from './schemas.js';
 import type { AdapterIngestResult, ParseError } from '../adapter.js';
 import { extractTurns } from './extract_turns.js';
+import { extractToolCalls } from './extract_tool_calls.js';
 
 export async function ingestClaudeCodeFile(
   filePath: string,
@@ -25,6 +26,7 @@ export async function ingestClaudeCodeFile(
     const new_offset = fromOffset + consumed_bytes;
 
     const assistantLines: AssistantLine[] = [];
+    const userLines: UserLine[] = [];
     const parse_errors: ParseError[] = [];
     let lineByteOffset = fromOffset;
 
@@ -36,6 +38,12 @@ export async function ingestClaudeCodeFile(
         if (obj?.type === 'assistant') {
           const parsed = AssistantLineSchema.parse(obj);
           assistantLines.push(parsed);
+        } else if (obj?.type === 'user') {
+          // User lines are read so we can attribute is_error to tool calls.
+          // If a user line fails the (loose) schema, we don't error-record it
+          // — that would flood parse_errors. Just skip and continue.
+          const parsed = UserLineSchema.safeParse(obj);
+          if (parsed.success) userLines.push(parsed.data);
         }
       } catch (e) {
         parse_errors.push({
@@ -49,6 +57,7 @@ export async function ingestClaudeCodeFile(
     }
 
     const turns = extractTurns(assistantLines);
+    const tool_calls = extractToolCalls(assistantLines, userLines);
     const sessionId = basename(filePath, '.jsonl');
     const cwd = assistantLines[0]?.cwd ?? '';
     const version = assistantLines[assistantLines.length - 1]?.version ?? null;
@@ -68,6 +77,7 @@ export async function ingestClaudeCodeFile(
           metadata: {},
         },
         turns,
+        tool_calls,
         parse_errors,
       },
       new_offset,
@@ -81,6 +91,7 @@ function emptyResult(file: string): AdapterIngestResult {
   return {
     header: { native_session_id: basename(file, '.jsonl'), agent: 'claude_code', agent_version: null, project_path: '', started_at: '', ended_at: null, agent_reported_cost_usd: null, metadata: {} },
     turns: [],
+    tool_calls: [],
     parse_errors: [],
   };
 }

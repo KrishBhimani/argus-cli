@@ -1,9 +1,14 @@
 import type { RawSessionHeader, RawTurnEvent } from '../schema/types.js';
+import type { RawToolCall } from './claude_code/extract_tool_calls.js';
 
 export interface AdapterIngestResult {
   header: RawSessionHeader;
   turns: RawTurnEvent[];
   parse_errors: ParseError[];
+  // Slice 1 (Tools page). Adapters that don't populate this leave it empty
+  // — the pipeline treats an empty array as "no tool data", not "delete
+  // existing tool_calls", so adapters can opt in incrementally.
+  tool_calls?: RawToolCall[];
 }
 
 export interface ParseError {

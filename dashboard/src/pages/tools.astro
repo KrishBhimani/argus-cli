@@ -1,0 +1,192 @@
+---
+import Default from '../layouts/Default.astro';
+---
+<Default title="Argus — Tools">
+  <h2>Tool usage</h2>
+  <div class="card" style="margin-bottom:1rem;display:flex;gap:0.6rem;align-items:center;">
+    <label style="color:var(--text-2);font-size:0.8rem;">Window</label>
+    <select id="w">
+      <option value="today">Today</option>
+      <option value="7d" selected>Last 7 days</option>
+      <option value="30d">Last 30 days</option>
+      <option value="all">All time</option>
+    </select>
+  </div>
+
+  <div class="grid-cards" id="kpis"></div>
+
+  <div class="card" style="margin-top:1.2rem;">
+    <h3>Tool leaderboard</h3>
+    <div id="leaderboard" class="chart-tall"></div>
+  </div>
+
+  <div class="grid-2" style="margin-top:1.2rem;" id="splits">
+    <div class="card">
+      <h3>MCP servers</h3>
+      <div id="mcp" class="chart"></div>
+    </div>
+    <div class="card">
+      <h3>Sub-agent invocations</h3>
+      <div id="subagents" class="chart"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:1.2rem;">
+    <h3>Per-tool details</h3>
+    <table id="tools-table">
+      <thead>
+        <tr>
+          <th>Tool</th>
+          <th class="num">Calls</th>
+          <th class="num">Errors</th>
+          <th class="num">Error rate</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    import { api } from '../scripts/api';
+    import { num } from '../scripts/format';
+    import * as echarts from 'echarts/core';
+    import { BarChart } from 'echarts/charts';
+    import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
+    import { CanvasRenderer } from 'echarts/renderers';
+    echarts.use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
+
+    const $ = (s: string) => document.querySelector(s) as HTMLElement;
+    const w = $('#w') as HTMLSelectElement;
+
+    let leaderChart: any, mcpChart: any, subChart: any;
+
+    function bar(el: HTMLElement, labels: string[], values: number[], color: string, errors?: number[]) {
+      const c = echarts.init(el);
+      c.setOption({
+        textStyle: { color: '#9ba6b3' },
+        tooltip: {
+          trigger: 'axis', axisPointer: { type: 'shadow' },
+          backgroundColor: '#1c222d', borderColor: '#262d3a',
+          textStyle: { color: '#e6edf3', fontSize: 12 },
+          formatter: (p: any) => {
+            const i = p[0].dataIndex;
+            const calls = values[i];
+            const err = errors?.[i] ?? 0;
+            return `${labels[i]}<br>Calls: ${calls.toLocaleString()}` +
+              (err ? `<br>Errors: ${err.toLocaleString()} (${((err/calls)*100).toFixed(1)}%)` : '');
+          },
+        },
+        grid: { left: 160, right: 30, top: 8, bottom: 28 },
+        xAxis: {
+          type: 'value',
+          axisLabel: { color: '#6b7585', fontSize: 11 },
+          splitLine: { lineStyle: { color: '#1c222d' } }, axisLine: { show: false },
+        },
+        yAxis: {
+          type: 'category', data: labels.slice().reverse(),
+          axisLabel: { color: '#6b7585', fontSize: 11 },
+          axisLine: { show: false }, axisTick: { show: false },
+        },
+        series: [{
+          type: 'bar', data: values.slice().reverse(),
+          itemStyle: { color, borderRadius: [0, 4, 4, 0] },
+          barWidth: '60%',
+        }],
+      });
+      return c;
+    }
+
+    function kpiCard(label: string, value: string, sub?: string) {
+      return `<div class="card"><div class="kpi">
+        <div class="kpi-label">${label}</div>
+        <div class="kpi-value">${value}</div>
+        ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
+      </div></div>`;
+    }
+
+    async function refresh() {
+      const data = await api.toolsOverview(w.value);
+
+      const totalCalls = data.total_calls;
+      const totalErrors = data.total_errors;
+      const errorRate = totalCalls > 0 ? ((totalErrors / totalCalls) * 100).toFixed(1) + '%' : '—';
+      const topTool = data.tool_leaderboard[0]?.name ?? '—';
+      const topMcp = data.mcp_servers[0]?.server ?? '—';
+
+      $('#kpis').innerHTML = [
+        kpiCard('Tool calls', num(totalCalls), w.value === 'all' ? 'all time' : w.value),
+        kpiCard('Error rate', errorRate, totalErrors > 0 ? `${num(totalErrors)} errors` : 'no errors'),
+        kpiCard('Top tool', `<code>${topTool}</code>`, data.tool_leaderboard[0] ? `${num(data.tool_leaderboard[0].calls)} calls` : ''),
+        kpiCard('Top MCP', topMcp === '—' ? '—' : `<code>${topMcp}</code>`, data.mcp_servers[0] ? `${num(data.mcp_servers[0].calls)} calls` : 'no MCP usage'),
+      ].join('');
+
+      // Leaderboard
+      leaderChart?.dispose();
+      if (data.tool_leaderboard.length === 0) {
+        $('#leaderboard').innerHTML = '<p class="empty">No tool activity in this window.</p>';
+      } else {
+        const top = data.tool_leaderboard.slice(0, 12);
+        leaderChart = bar(
+          $('#leaderboard'),
+          top.map(t => t.name),
+          top.map(t => t.calls),
+          '#f0883e',
+          top.map(t => t.errors),
+        );
+      }
+
+      // MCP / subagents — hide the panel entirely if empty so we don't show a hollow widget
+      const splits = $('#splits');
+      const mcpCard = splits.children[0] as HTMLElement;
+      const subCard = splits.children[1] as HTMLElement;
+
+      mcpChart?.dispose();
+      if (data.mcp_servers.length === 0) {
+        mcpCard.style.display = 'none';
+      } else {
+        mcpCard.style.display = '';
+        mcpChart = bar(
+          $('#mcp'),
+          data.mcp_servers.map(m => m.server),
+          data.mcp_servers.map(m => m.calls),
+          '#58a6ff',
+          data.mcp_servers.map(m => m.errors),
+        );
+      }
+
+      subChart?.dispose();
+      if (data.subagents.length === 0) {
+        subCard.style.display = 'none';
+      } else {
+        subCard.style.display = '';
+        subChart = bar(
+          $('#subagents'),
+          data.subagents.map(s => s.type),
+          data.subagents.map(s => s.calls),
+          '#bc8cff',
+          data.subagents.map(s => s.errors),
+        );
+      }
+
+      // Hide entire splits row if both are empty
+      splits.style.display = data.mcp_servers.length === 0 && data.subagents.length === 0 ? 'none' : '';
+
+      // Detail table
+      const tbody = $('#tools-table tbody');
+      tbody.innerHTML = data.tool_leaderboard.length === 0
+        ? '<tr><td colspan="4" class="empty">—</td></tr>'
+        : data.tool_leaderboard.map(t => `
+          <tr>
+            <td><code>${t.name}</code></td>
+            <td class="num">${num(t.calls)}</td>
+            <td class="num">${num(t.errors)}</td>
+            <td class="num">${(t.error_rate * 100).toFixed(1)}%</td>
+          </tr>
+        `).join('');
+    }
+
+    w.addEventListener('change', refresh);
+    refresh();
+    window.addEventListener('resize', () => [leaderChart, mcpChart, subChart].forEach(c => c?.resize()));
+  </script>
+</Default>

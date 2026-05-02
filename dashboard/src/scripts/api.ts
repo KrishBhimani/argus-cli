@@ -43,6 +43,25 @@ export interface Overview {
   cost_by_day: Record<string, number>;
 }
 
+export interface ToolsOverview {
+  window: string;
+  total_calls: number;
+  total_errors: number;
+  tool_leaderboard: { name: string; calls: number; errors: number; error_rate: number }[];
+  mcp_servers: { server: string; calls: number; errors: number; tools_used: number }[];
+  subagents: { type: string; calls: number; errors: number }[];
+}
+
+export interface PromptHit {
+  id: number;
+  timestamp_ms: number;
+  project_path: string;
+  display: string;
+  snippet: string;
+  pasted_chars: number;
+  session_id: string | null;
+}
+
 export const api = {
   sessions: (q = '') => fetch('/api/sessions' + q).then(r => r.json() as Promise<{ sessions: Session[] }>),
   session: (id: string) => fetch('/api/sessions/' + encodeURIComponent(id)).then(r => r.ok ? r.json() as Promise<{ session: Session; turns: Turn[] }> : null),
@@ -50,4 +69,15 @@ export const api = {
   trends: (granularity: string, groupBy: string) => fetch(`/api/trends?granularity=${granularity}&groupBy=${groupBy}`).then(r => r.json() as Promise<{ points: { bucket: string; groups: Record<string, { cost: number; tokens: number; sessions: number }> }[] }>),
   pricing: () => fetch('/api/pricing').then(r => r.json() as Promise<{ version: string }>),
   parseErrors: () => fetch('/api/parse-errors').then(r => r.json() as Promise<{ errors: { file: string; reason: string; raw_line_truncated: string }[] }>),
+  toolsOverview: (window: string) => fetch('/api/tools/overview?window=' + window).then(r => r.json() as Promise<ToolsOverview>),
+  prompts: (params: { q?: string; limit?: number; project?: string; includeSlash?: boolean }) => {
+    const sp = new URLSearchParams();
+    if (params.q) sp.set('q', params.q);
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.project) sp.set('project', params.project);
+    if (params.includeSlash) sp.set('include_slash', '1');
+    return fetch('/api/prompts?' + sp.toString()).then(r => r.json() as Promise<{ total: number; prompts: PromptHit[] }>);
+  },
+  promptStats: () => fetch('/api/prompts/stats').then(r => r.json() as Promise<{ total: number; projects: number; oldest_ms: number | null }>),
+  promptProjects: () => fetch('/api/prompts/projects').then(r => r.json() as Promise<{ projects: string[] }>),
 };

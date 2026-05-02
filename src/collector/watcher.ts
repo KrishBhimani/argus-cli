@@ -1,8 +1,11 @@
 import chokidar, { type FSWatcher } from 'chokidar';
+import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import type { Adapter } from '../adapters/adapter.js';
 import type { Repository } from '../store/repository.js';
 import type { PricingTable } from '../pricing/types.js';
 import { ingestFile } from './pipeline.js';
+import { ingestHistoryFile } from '../adapters/claude_code/history_jsonl.js';
 
 export interface WatcherOpts { stabilityThresholdMs?: number; }
 
@@ -26,6 +29,32 @@ export async function startWatcher(adapters: Adapter[], repo: Repository, table:
     };
     w.on('add', handle).on('change', handle);
     watchers.push(w);
+
+    // Slice 1: also watch the global ~/.claude/history.jsonl for the
+    // Prompts page. The adapter's root is ~/.claude for the claude_code
+    // adapter, so the file lives directly under it.
+    if (a.agent === 'claude_code') {
+      const historyPath = join(root, 'history.jsonl');
+      if (existsSync(historyPath)) {
+        const hw = chokidar.watch(historyPath, {
+          persistent: true,
+          ignoreInitial: false,
+          awaitWriteFinish: { stabilityThreshold: opts.stabilityThresholdMs ?? 100, pollInterval: 30 },
+        });
+        const histHandle = async () => {
+          try { await ingestHistoryFile(historyPath, repo); }
+          catch (e) {
+            repo.recordParseError({
+              file: historyPath, byte_offset: -1,
+              reason: `[history] ${e instanceof Error ? e.message : String(e)}`,
+              raw_line_truncated: '',
+            });
+          }
+        };
+        hw.on('add', histHandle).on('change', histHandle);
+        watchers.push(hw);
+      }
+    }
   }
   return async () => { await Promise.all(watchers.map(w => w.close())); };
 }
