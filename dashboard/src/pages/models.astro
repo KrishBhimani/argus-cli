@@ -27,7 +27,7 @@ import Default from '../layouts/Default.astro';
           <th class="num">Cache read</th>
           <th class="num">Cache write</th>
           <th class="num">Total tokens</th>
-          <th class="num">Cost</th>
+          <th class="num">Cost <span class="est">(est.)</span></th>
           <th class="num">Avg $/session</th>
         </tr>
       </thead>
@@ -118,9 +118,9 @@ import Default from '../layouts/Default.astro';
           <td class="num">${tok(v.output)}</td>
           <td class="num">${tok(v.cr)}</td>
           <td class="num">${tok(v.cw)}</td>
-          <td class="num">${tok(v.fresh + v.output + v.cr + v.cw)}</td>
-          <td class="num cost">${usd(v.cost)}</td>
-          <td class="num">${usd(v.sessions ? v.cost / v.sessions : 0)}</td>
+          <td class="num tok">${tok(v.fresh + v.output + v.cr + v.cw)}</td>
+          <td class="num cost">~${usd(v.cost)}</td>
+          <td class="num">~${usd(v.sessions ? v.cost / v.sessions : 0)}</td>
         </tr>
       `).join('');
     }

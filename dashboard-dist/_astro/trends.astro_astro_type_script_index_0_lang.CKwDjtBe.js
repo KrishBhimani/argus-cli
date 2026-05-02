@@ -1,5 +1,0 @@
-import{a as m}from"./api.DTjsyKW_.js";import{u as d}from"./format.BhQS7yvh.js";import{t as u}from"./charts.BbBL5qZf.js";import"./installCanvasRenderer.4JmZ8sp0.js";const e=s=>document.querySelector(s);let r;async function c(){const s=e("#g").value,i=e("#b").value,{points:n}=await m.trends(s,i);r?.dispose(),n.length?r=u(e("#line"),n):e("#line").innerHTML='<p class="empty">No data.</p>';const a=[...new Set(n.flatMap(t=>Object.keys(t.groups)))];e("#breakdown").innerHTML=n.length?`
-        <table>
-          <thead><tr><th>${s.charAt(0).toUpperCase()+s.slice(1)}</th>${a.map(t=>`<th class="num">${t}</th>`).join("")}<th class="num">Total</th></tr></thead>
-          <tbody>${n.map(t=>{const l=a.reduce((o,p)=>o+(t.groups[p]?.cost??0),0);return`<tr><td>${t.bucket}</td>${a.map(o=>`<td class="num cost">${d(t.groups[o]?.cost??0)}</td>`).join("")}<td class="num cost"><strong>${d(l)}</strong></td></tr>`}).join("")}</tbody>
-        </table>`:'<p class="empty">—</p>'}e("#g").addEventListener("change",c);e("#b").addEventListener("change",c);c();window.addEventListener("resize",()=>r?.resize());

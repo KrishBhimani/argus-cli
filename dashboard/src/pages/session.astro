@@ -44,8 +44,8 @@ import Default from '../layouts/Default.astro';
 
         root.innerHTML = `
           <div class="grid-cards" style="margin-bottom:1.2rem;">
-            <div class="card kpi"><span class="kpi-label">Cost</span><span class="kpi-value cost">${usd(s.total_cost_usd)}</span><span class="kpi-sub">${reportedDelta}</span></div>
-            <div class="card kpi"><span class="kpi-label">Tokens</span><span class="kpi-value">${tok(totalTokens)}</span><span class="kpi-sub">${num(totalTokens)} total</span></div>
+            <div class="card kpi"><span class="kpi-label">Tokens</span><span class="kpi-value tokens">${tok(totalTokens)}</span><span class="kpi-sub">${num(totalTokens)} total</span></div>
+            <div class="card kpi"><span class="kpi-label">Cost <span style="color:var(--text-2);font-weight:400;">(est.)</span></span><span class="kpi-value cost">~${usd(s.total_cost_usd)}</span><span class="kpi-sub">${reportedDelta}</span></div>
             <div class="card kpi"><span class="kpi-label">Turns</span><span class="kpi-value">${num(s.turn_count)}</span><span class="kpi-sub">${turns.length} loaded</span></div>
             <div class="card kpi"><span class="kpi-label">Duration</span><span class="kpi-value">${dur(s.duration_sec)}</span><span class="kpi-sub">started ${fmtLocalDateTime(s.started_at)}</span></div>
           </div>
@@ -88,7 +88,7 @@ import Default from '../layouts/Default.astro';
                 <tr>
                   <th class="num">#</th><th>Time</th><th>Model</th>
                   <th class="num">Fresh in</th><th class="num">Cache read</th><th class="num">Cache write</th>
-                  <th class="num">Output</th><th class="num">Tools</th><th class="num">Cost</th>
+                  <th class="num">Output</th><th class="num">Tools</th><th class="num">Cost <span class="est">(est.)</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -97,12 +97,12 @@ import Default from '../layouts/Default.astro';
                     <td class="num">${t.sequence}</td>
                     <td>${fmtLocalTime(t.timestamp)}</td>
                     <td><code>${t.model}</code></td>
-                    <td class="num">${num(t.fresh_input_tokens)}</td>
-                    <td class="num">${num(t.cache_read_tokens)}</td>
-                    <td class="num">${num(t.cache_write_tokens)}</td>
-                    <td class="num">${num(t.output_tokens)}</td>
+                    <td class="num tok">${num(t.fresh_input_tokens)}</td>
+                    <td class="num tok">${num(t.cache_read_tokens)}</td>
+                    <td class="num tok">${num(t.cache_write_tokens)}</td>
+                    <td class="num tok">${num(t.output_tokens)}</td>
                     <td class="num">${t.tool_calls_count}</td>
-                    <td class="num cost">${usd(t.cost_usd)}</td>
+                    <td class="num cost">~${usd(t.cost_usd)}</td>
                   </tr>`).join('')}
               </tbody>
             </table>` : '<p class="empty">No turns recorded for this session.</p>'}

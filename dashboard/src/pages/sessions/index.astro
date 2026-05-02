@@ -20,7 +20,7 @@ import Default from '../../layouts/Default.astro';
           <th data-sort="duration_sec" class="num">Duration</th>
           <th data-sort="turn_count" class="num">Turns</th>
           <th data-sort="tokens" class="num">Tokens</th>
-          <th data-sort="total_cost_usd" class="num">Cost</th>
+          <th data-sort="total_cost_usd" class="num">Cost <span class="est">(est.)</span></th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -61,8 +61,8 @@ import Default from '../../layouts/Default.astro';
           <td><code>${s.primary_model}</code></td>
           <td class="num">${dur(s.duration_sec)}</td>
           <td class="num">${num(s.turn_count)}</td>
-          <td class="num">${tok(tokens(s))}</td>
-          <td class="num cost">${usd(s.total_cost_usd)}</td>
+          <td class="num tok">${tok(tokens(s))}</td>
+          <td class="num cost">~${usd(s.total_cost_usd)}</td>
         </tr>
       `).join('') || '<tr><td colspan="7" class="empty">No sessions match.</td></tr>';
       tbody.querySelectorAll('tr[data-id]').forEach(tr => {

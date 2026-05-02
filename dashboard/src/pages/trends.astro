@@ -36,10 +36,14 @@ import Default from '../layouts/Default.astro';
       const allKeys = [...new Set(points.flatMap(p => Object.keys(p.groups)))];
       $('#breakdown').innerHTML = points.length ? `
         <table>
-          <thead><tr><th>${g.charAt(0).toUpperCase() + g.slice(1)}</th>${allKeys.map(k => `<th class="num">${k}</th>`).join('')}<th class="num">Total</th></tr></thead>
+          <thead><tr><th>${g.charAt(0).toUpperCase() + g.slice(1)}</th>${allKeys.map(k => `<th class="num">${k} tokens</th>`).join('')}<th class="num">Total tokens</th><th class="num">Total <span class="est">(est. cost)</span></th></tr></thead>
           <tbody>${points.map(p => {
-            const total = allKeys.reduce((a, k) => a + (p.groups[k]?.cost ?? 0), 0);
-            return `<tr><td>${p.bucket}</td>${allKeys.map(k => `<td class="num cost">${usd(p.groups[k]?.cost ?? 0)}</td>`).join('')}<td class="num cost"><strong>${usd(total)}</strong></td></tr>`;
+            const totalCost = allKeys.reduce((a, k) => a + (p.groups[k]?.cost ?? 0), 0);
+            const totalTokens = allKeys.reduce((a, k) => a + (p.groups[k]?.tokens ?? 0), 0);
+            return `<tr><td>${p.bucket}</td>${allKeys.map(k => {
+              const tokens = p.groups[k]?.tokens ?? 0;
+              return `<td class="num tok">${tokens > 0 ? num(tokens) : '—'}</td>`;
+            }).join('')}<td class="num tok"><strong>${num(totalTokens)}</strong></td><td class="num cost">~${usd(totalCost)}</td></tr>`;
           }).join('')}</tbody>
         </table>` : '<p class="empty">—</p>';
     }
