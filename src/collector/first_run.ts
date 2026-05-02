@@ -27,7 +27,10 @@ export function runFirstPassIngest(adapters: Adapter[], repo: Repository, table:
     }
     total = recent.length + older.length;
     for (const { adapter, file } of recent) {
-      await ingestFile(adapter, file, repo, table);
+      try { await ingestFile(adapter, file, repo, table); }
+      catch (e) {
+        repo.recordParseError({ file, byte_offset: -1, reason: `[ingest] ${e instanceof Error ? e.message : String(e)}`, raw_line_truncated: '' });
+      }
       processed++;
     }
     foregroundComplete = true;
@@ -37,7 +40,10 @@ export function runFirstPassIngest(adapters: Adapter[], repo: Repository, table:
   const backfillDone = (async () => {
     const { older } = await foregroundDone;
     for (const { adapter, file } of older) {
-      await ingestFile(adapter, file, repo, table);
+      try { await ingestFile(adapter, file, repo, table); }
+      catch (e) {
+        repo.recordParseError({ file, byte_offset: -1, reason: `[ingest] ${e instanceof Error ? e.message : String(e)}`, raw_line_truncated: '' });
+      }
       processed++;
     }
   })();
