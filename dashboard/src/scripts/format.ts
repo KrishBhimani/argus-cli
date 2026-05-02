@@ -48,8 +48,5 @@ export const shortPath = (p: string, n = 40) => {
   return '…/' + tail;
 };
 
-export const agentTag = (a: string) => {
-  const cls = a === 'claude_code' ? 'tag-claude' : a === 'codex' ? 'tag-codex' : '';
-  const label = a === 'claude_code' ? 'Claude' : a === 'codex' ? 'Codex' : a;
-  return `<span class="tag ${cls}">${label}</span>`;
-};
+// Kept for backward compat with any pages still importing it; only Claude Code is supported now.
+export const agentTag = (_a: string) => `<span class="tag tag-claude">Claude</span>`;

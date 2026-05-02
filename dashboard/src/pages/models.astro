@@ -1,0 +1,131 @@
+---
+import Default from '../layouts/Default.astro';
+---
+<Default title="Argus — Models">
+  <h2>Spend by model</h2>
+  <div class="card" style="margin-bottom:1rem;display:flex;gap:0.6rem;align-items:center;">
+    <label style="color:var(--text-2);font-size:0.8rem;">Window</label>
+    <select id="w">
+      <option value="7d">Last 7 days</option>
+      <option value="30d" selected>Last 30 days</option>
+      <option value="all">All time</option>
+    </select>
+  </div>
+  <div class="card">
+    <h3>Cost & token mix per model</h3>
+    <div id="bar" class="chart-tall"></div>
+  </div>
+  <div class="card" style="margin-top:1rem;">
+    <h3>Per-model details</h3>
+    <table id="t">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th class="num">Sessions</th>
+          <th class="num">Fresh in</th>
+          <th class="num">Output</th>
+          <th class="num">Cache read</th>
+          <th class="num">Cache write</th>
+          <th class="num">Total tokens</th>
+          <th class="num">Cost</th>
+          <th class="num">Avg $/session</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    import { api, type Session } from '../scripts/api';
+    import { usd, tok, num } from '../scripts/format';
+    import * as echarts from 'echarts/core';
+    import { BarChart } from 'echarts/charts';
+    import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
+    import { CanvasRenderer } from 'echarts/renderers';
+    echarts.use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
+
+    const $ = (s: string) => document.querySelector(s) as HTMLElement;
+    const w = $('#w') as HTMLSelectElement;
+    let chart: any;
+
+    async function refresh() {
+      const all = (await api.sessions('?limit=100000')).sessions as Session[];
+      const cutoff = w.value === '7d' ? Date.now() - 7 * 86_400_000
+        : w.value === '30d' ? Date.now() - 30 * 86_400_000 : 0;
+      const sessions = all.filter(s => new Date(s.started_at).getTime() >= cutoff);
+
+      const map = new Map<string, { sessions: number; fresh: number; output: number; cr: number; cw: number; cost: number }>();
+      for (const s of sessions) {
+        const k = s.primary_model;
+        const cur = map.get(k) ?? { sessions: 0, fresh: 0, output: 0, cr: 0, cw: 0, cost: 0 };
+        cur.sessions += 1;
+        cur.fresh += s.total_fresh_input_tokens;
+        cur.output += s.total_output_tokens;
+        cur.cr += s.total_cache_read_tokens;
+        cur.cw += s.total_cache_write_tokens;
+        cur.cost += s.total_cost_usd;
+        map.set(k, cur);
+      }
+      const rows = [...map.entries()].sort((a, b) => b[1].cost - a[1].cost);
+
+      if (rows.length === 0) {
+        $('#bar').innerHTML = '<p class="empty">No sessions in this window.</p>';
+        $('#t tbody').innerHTML = '<tr><td colspan="9" class="empty">—</td></tr>';
+        return;
+      }
+
+      chart?.dispose();
+      chart = echarts.init($('#bar'));
+      chart.setOption({
+        textStyle: { color: '#9ba6b3' },
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: '#1c222d',
+          borderColor: '#262d3a',
+          textStyle: { color: '#e6edf3', fontSize: 12 },
+          valueFormatter: (v: number) => v.toLocaleString() + ' tokens',
+        },
+        legend: { top: 0, textStyle: { color: '#9ba6b3', fontSize: 11 } },
+        grid: { left: 140, right: 30, top: 36, bottom: 28 },
+        xAxis: {
+          type: 'value',
+          axisLabel: { color: '#6b7585', fontSize: 11, formatter: (v: number) => v >= 1_000_000 ? (v/1_000_000).toFixed(1) + 'M' : v >= 1000 ? (v/1000).toFixed(0) + 'k' : String(v) },
+          splitLine: { lineStyle: { color: '#1c222d' } }, axisLine: { show: false },
+        },
+        yAxis: {
+          type: 'category',
+          data: rows.map(([m]) => m).reverse(),
+          axisLabel: { color: '#6b7585', fontSize: 11 },
+          axisLine: { show: false }, axisTick: { show: false },
+        },
+        series: [
+          { name: 'Fresh input', type: 'bar', stack: 't', data: rows.map(([_, v]) => v.fresh).reverse(),
+            itemStyle: { color: '#f0883e' } },
+          { name: 'Output', type: 'bar', stack: 't', data: rows.map(([_, v]) => v.output).reverse(),
+            itemStyle: { color: '#bc8cff' } },
+          { name: 'Cache read', type: 'bar', stack: 't', data: rows.map(([_, v]) => v.cr).reverse(),
+            itemStyle: { color: '#58a6ff' } },
+          { name: 'Cache write', type: 'bar', stack: 't', data: rows.map(([_, v]) => v.cw).reverse(),
+            itemStyle: { color: '#7ee787' } },
+        ],
+      });
+
+      $('#t tbody').innerHTML = rows.map(([m, v]) => `
+        <tr>
+          <td><code>${m}</code></td>
+          <td class="num">${num(v.sessions)}</td>
+          <td class="num">${tok(v.fresh)}</td>
+          <td class="num">${tok(v.output)}</td>
+          <td class="num">${tok(v.cr)}</td>
+          <td class="num">${tok(v.cw)}</td>
+          <td class="num">${tok(v.fresh + v.output + v.cr + v.cw)}</td>
+          <td class="num cost">${usd(v.cost)}</td>
+          <td class="num">${usd(v.sessions ? v.cost / v.sessions : 0)}</td>
+        </tr>
+      `).join('');
+    }
+    w.addEventListener('change', refresh);
+    refresh();
+    window.addEventListener('resize', () => chart?.resize());
+  </script>
+</Default>

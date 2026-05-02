@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './store/db.js';
 import { Repository } from './store/repository.js';
 import { ClaudeCodeAdapter } from './adapters/claude_code/index.js';
-import { CodexAdapter } from './adapters/codex/index.js';
 import { runFirstPassIngest } from './collector/first_run.js';
 import { startWatcher } from './collector/watcher.js';
 import { startServer } from './server/server.js';
@@ -27,15 +26,11 @@ program.command('start')
     const db = openDb(join(dataDir, 'argus.db'));
     const repo = new Repository(db);
     const claudeRoot = join(homedir(), '.claude');
-    const codexRoot = join(homedir(), '.codex');
-    const adapters = [
-      ...(existsSync(claudeRoot) ? [new ClaudeCodeAdapter(claudeRoot)] : []),
-      ...(existsSync(codexRoot) ? [new CodexAdapter(codexRoot)] : []),
-    ];
-    if (adapters.length === 0) {
-      console.error('No agent log directories found at ~/.claude or ~/.codex');
+    if (!existsSync(claudeRoot)) {
+      console.error('No Claude Code log directory found at ~/.claude');
       process.exit(1);
     }
+    const adapters = [new ClaudeCodeAdapter(claudeRoot)];
     const table = await loadPricingTable();
     console.log('Argus: ingesting recent sessions...');
     const { foregroundDone, status } = runFirstPassIngest(adapters, repo, table, { recentDays: 30 });

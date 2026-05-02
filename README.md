@@ -1,6 +1,6 @@
 # Argus
 
-Local-first dashboard for coding-agent costs. Reads Claude Code (`~/.claude/`) and OpenAI Codex CLI (`~/.codex/`) logs, normalizes them, computes cost from a bundled pricing table, and serves a dashboard at `http://localhost:4242`.
+Local-first dashboard for Claude Code usage and cost. Reads `~/.claude/` session logs, normalizes them, computes cost from a bundled pricing table, and serves a dashboard at `http://localhost:4242`.
 
 ## Install
 

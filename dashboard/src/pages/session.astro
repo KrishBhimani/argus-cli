@@ -9,7 +9,7 @@ import Default from '../layouts/Default.astro';
 
   <script>
     import { api, type Turn } from '../scripts/api';
-    import { usd, tok, num, dur, agentTag } from '../scripts/format';
+    import { usd, tok, num, dur } from '../scripts/format';
 
     const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const TZ_ABBREV = (() => {
@@ -54,7 +54,7 @@ import Default from '../layouts/Default.astro';
             <h3>Session</h3>
             <table style="border:none;">
               <tbody>
-                <tr><td style="width:25%;color:var(--text-2);">Agent</td><td>${agentTag(s.agent)} <code>${s.agent_version ?? ''}</code></td></tr>
+                <tr><td style="width:25%;color:var(--text-2);">Claude Code</td><td><code>${s.agent_version ?? '—'}</code></td></tr>
                 <tr><td style="color:var(--text-2);">Project</td><td class="mono">${s.project_path || '—'}</td></tr>
                 <tr><td style="color:var(--text-2);">Primary model</td><td><code>${s.primary_model}</code></td></tr>
                 <tr><td style="color:var(--text-2);">Started</td><td>${fmtLocalDateTime(s.started_at)} <span style="color:var(--text-2);font-size:0.8rem;">${TZ_ABBREV} (${TZ})</span></td></tr>
