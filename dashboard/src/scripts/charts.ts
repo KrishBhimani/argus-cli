@@ -104,10 +104,12 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
     const key = d.toISOString().slice(0, 10);
     const v = lookup[key] ?? 0;
     if (v > max) max = v;
-    const dayOfWeek = d.getUTCDay();
+    // Remap JS dayOfWeek (0=Sun..6=Sat) to row index for our Mon-first axis
+    // ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']: Sun→6, Mon→0, Tue→1, ..., Sat→5
+    const rowIdx = (d.getUTCDay() + 6) % 7;
     const weekIdx = Math.floor((lookbackDays - 1 - i) / 7);
-    cells.push([weekIdx, dayOfWeek, +v.toFixed(4)]);
-    cellDate.set(`${weekIdx}-${dayOfWeek}`, key);
+    cells.push([weekIdx, rowIdx, +v.toFixed(4)]);
+    cellDate.set(`${weekIdx}-${rowIdx}`, key);
   }
   const weeks = Math.ceil(lookbackDays / 7);
   c.setOption({
@@ -129,8 +131,8 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
       splitArea: { show: false },
     },
     yAxis: {
-      type: 'category', data: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
-      inverse: true, // Sunday at the top, Saturday at the bottom (standard calendar order)
+      type: 'category', data: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      inverse: true, // Mon at the top, Sun at the bottom
       axisLabel: { ...AXIS.axisLabel, fontSize: 9 }, axisLine: { show: false }, axisTick: { show: false },
       splitArea: { show: false },
     },
