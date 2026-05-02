@@ -151,7 +151,9 @@ th.sorted-asc::after { content: " ↑"; color: var(--accent); }
 tbody tr:hover { background: var(--bg-2); cursor: pointer; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.mono { font-family: 'SF Mono', Consolas, monospace; font-size: 0.82rem; color: var(--text-1); }
-td.cost { color: var(--accent); font-weight: 500; }
+td.tok { color: var(--accent); font-weight: 600; }
+td.cost { color: var(--text-1); font-weight: 400; }
+th .est { color: var(--text-2); font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 0.7rem; }
 
 .kpi {
   display: flex;
@@ -161,16 +163,37 @@ td.cost { color: var(--accent); font-weight: 500; }
 .kpi-label { font-size: 0.72rem; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.06em; }
 .kpi-value { font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .kpi-sub { font-size: 0.82rem; color: var(--text-1); }
-.kpi-value.cost { color: var(--accent); }
+.kpi-value.tokens { color: var(--accent); }
+.kpi-value.cost { color: var(--text-1); font-weight: 500; }
 
 .hero {
   text-align: center;
   padding: 2rem 1rem 1.5rem;
 }
 .hero-controls { margin-bottom: 1.5rem; display: flex; justify-content: center; gap: 0.6rem; align-items: center; }
-.hero-cost { font-size: 5rem; font-weight: 700; line-height: 1; color: var(--accent); margin: 0.3rem 0; font-variant-numeric: tabular-nums; }
-.hero-sub { color: var(--text-1); font-size: 1rem; }
+.hero-box {
+  display: inline-block;
+  padding: 2.4rem 3.5rem 1.6rem;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  margin: 0.5rem 0 0.6rem;
+  position: relative;
+}
+.hero-box::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  background: radial-gradient(ellipse at top, rgba(240, 136, 62, 0.08), transparent 70%);
+  pointer-events: none;
+}
+.hero-tokens { font-size: 5rem; font-weight: 700; line-height: 1; color: var(--accent); margin: 0; font-variant-numeric: tabular-nums; position: relative; }
+.hero-tokens-label { color: var(--text-2); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.18em; margin-top: 0.6rem; position: relative; }
+.hero-sub { color: var(--text-1); font-size: 1rem; margin-top: 1.2rem; }
 .hero-sub strong { color: var(--text-0); font-weight: 600; }
+.hero-sub .est-note { color: var(--text-2); font-size: 0.85rem; }
 
 .chart { width: 100%; min-height: 260px; }
 .chart-sm { width: 100%; min-height: 180px; }

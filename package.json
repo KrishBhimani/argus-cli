@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run build:dashboard",
-    "build:dashboard": "cd dashboard && npm run build && cd .. && rm -rf dashboard-dist && cp -r dashboard/dist dashboard-dist",
+    "build:dashboard": "cp dashboard/src/styles/global.css dashboard/public/styles/global.css && cd dashboard && npm run build && cd .. && rm -rf dashboard-dist && cp -r dashboard/dist dashboard-dist",
     "dev": "tsx src/cli.ts start",
     "test": "vitest run",
     "test:watch": "vitest"
