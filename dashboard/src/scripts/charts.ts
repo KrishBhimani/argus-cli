@@ -130,6 +130,7 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
     },
     yAxis: {
       type: 'category', data: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+      inverse: true, // Sunday at the top, Saturday at the bottom (standard calendar order)
       axisLabel: { ...AXIS.axisLabel, fontSize: 9 }, axisLine: { show: false }, axisTick: { show: false },
       splitArea: { show: false },
     },
