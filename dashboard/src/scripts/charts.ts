@@ -86,17 +86,25 @@ export function modelMix(el: HTMLElement, models: { name: string; cost: number }
 export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: number }[], lookbackDays = 90) {
   const c = makeChart(el);
   const lookup = Object.fromEntries(days.map(d => [d.day, d.cost]));
-  const today = new Date();
-  const cells: [number, number, number][] = [];
+  // Anchor at UTC midnight so lookup keys align with the API's started_at.slice(0,10)
+  // bucketing. Stepping by exactly 86400000 ms from a UTC-midnight anchor is robust against
+  // local-timezone hour-of-day skew.
+  const now = new Date();
+  const todayUtcMidnightMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  // [weekIdx, dayOfWeek, cost, dateKey] — the dateKey is stored directly so the tooltip
+  // doesn't have to reverse-derive it from cell coords (the previous reverse formula was
+  // buggy and produced wrong dates).
+  const cells: [number, number, number, string][] = [];
   let max = 0;
   for (let i = lookbackDays - 1; i >= 0; i--) {
-    const d = new Date(today.getTime() - i * 86_400_000);
+    const dayMs = todayUtcMidnightMs - i * 86_400_000;
+    const d = new Date(dayMs);
     const key = d.toISOString().slice(0, 10);
     const v = lookup[key] ?? 0;
     if (v > max) max = v;
-    const dayOfWeek = d.getDay();
+    const dayOfWeek = d.getUTCDay();
     const weekIdx = Math.floor((lookbackDays - 1 - i) / 7);
-    cells.push([weekIdx, dayOfWeek, +v.toFixed(4)]);
+    cells.push([weekIdx, dayOfWeek, +v.toFixed(4), key]);
   }
   const weeks = Math.ceil(lookbackDays / 7);
   c.setOption({
@@ -104,10 +112,9 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
     tooltip: {
       ...THEME.tooltip,
       formatter: (p: any) => {
-        const [wk, _dow, v] = p.data;
-        const offsetDays = lookbackDays - 1 - (wk * 7 + (6 - p.data[1]));
-        const d = new Date(today.getTime() - offsetDays * 86_400_000);
-        return `${d.toISOString().slice(0, 10)}<br>$${v.toFixed(2)}`;
+        const v = p.data[2];
+        const key = p.data[3];
+        return `${key}<br>${v > 0 ? '~$' + v.toFixed(2) : '<span style="color:#6b7585;">no activity</span>'}`;
       },
     },
     grid: { left: 30, right: 10, top: 8, bottom: 22 },
