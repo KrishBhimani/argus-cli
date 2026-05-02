@@ -12,6 +12,16 @@ const WINDOWS: Record<string, number | null> = { 'today': 1, '7d': 7, '30d': 30,
 // view to avoid double-counting.
 const isTopLevel = (id: string) => !id.includes('/');
 
+// Sessions with zero turns are typically Codex stubs (binary launched, no
+// prompt sent → session_meta written but no token_count events) or legacy /
+// truncated files. They have no usable cost or token data — exclude from
+// listings and aggregates so the dashboard shows only sessions that actually
+// did something.
+import type { Session } from '../schema/types.js';
+const isMeaningful = (s: Session) => s.turn_count > 0
+  || s.total_cost_usd > 0
+  || s.total_fresh_input_tokens + s.total_output_tokens + s.total_cache_read_tokens + s.total_cache_write_tokens > 0;
+
 function weekOf(iso: string): string {
   const d = new Date(iso);
   const start = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
@@ -27,7 +37,7 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     const offset = Number(c.req.query('offset') ?? 0);
     const agent = c.req.query('agent') ?? undefined;
     const includeSub = c.req.query('includeSub') === 'true';
-    const sessions = repo.listSessions({ limit, offset, agent }).filter(s => includeSub || isTopLevel(s.id));
+    const sessions = repo.listSessions({ limit, offset, agent }).filter(s => (includeSub || isTopLevel(s.id)) && isMeaningful(s));
     return c.json({ sessions });
   });
 
@@ -73,7 +83,7 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
   app.get('/api/trends', (c) => {
     const granularity = (c.req.query('granularity') ?? 'day') as 'day' | 'week' | 'month';
     const groupBy = (c.req.query('groupBy') ?? 'agent') as 'agent' | 'model';
-    const all = repo.listSessions({ limit: 100_000 }).filter(s => isTopLevel(s.id));
+    const all = repo.listSessions({ limit: 100_000 }).filter(s => isTopLevel(s.id) && isMeaningful(s));
     const bucket = (iso: string) => granularity === 'day' ? iso.slice(0, 10)
       : granularity === 'week' ? `${iso.slice(0, 4)}-W${weekOf(iso)}`
       : iso.slice(0, 7);
@@ -94,12 +104,12 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
   app.get('/api/pricing', (c) => c.json({ version: deps.pricingTableVersion }));
 
   app.get('/api/export.json', (c) => {
-    const sessions = repo.listSessions({ limit: 1_000_000 }).filter(s => isTopLevel(s.id));
+    const sessions = repo.listSessions({ limit: 1_000_000 }).filter(s => isTopLevel(s.id) && isMeaningful(s));
     return c.json({ sessions });
   });
 
   app.get('/api/export.csv', (c) => {
-    const rows = repo.listSessions({ limit: 1_000_000 }).filter(s => isTopLevel(s.id));
+    const rows = repo.listSessions({ limit: 1_000_000 }).filter(s => isTopLevel(s.id) && isMeaningful(s));
     const header = 'id,agent,started_at,ended_at,project_path,primary_model,total_cost_usd,total_fresh_input_tokens,total_output_tokens,turn_count\n';
     const body = rows.map(s => [s.id, s.agent, s.started_at, s.ended_at ?? '', s.project_path, s.primary_model, s.total_cost_usd, s.total_fresh_input_tokens, s.total_output_tokens, s.turn_count].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     return c.body(header + body, 200, { 'content-type': 'text/csv' });

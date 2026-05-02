@@ -13,7 +13,19 @@ export async function ingestFile(adapter: Adapter, filePath: string, repo: Repos
   const { result, new_offset } = await adapter.ingestFile(filePath, fromOffset);
 
   for (const e of result.parse_errors) repo.recordParseError(e);
-  if (result.turns.length === 0 && fromOffset === new_offset) return;
+
+  // No turn events in the bytes we just read. Three sub-cases:
+  //   (a) re-ingest with no file growth — nothing to do.
+  //   (b) first ingest of a file containing only metadata / user lines / hooks.
+  //   (c) Codex stub session: the binary launched (writing session_meta)
+  //       but no prompt was ever sent, so no token_count events exist.
+  // For (b) and (c) we still record the new offset so we don't re-read those
+  // bytes next time, but we MUST NOT create an empty session row — that
+  // clutters the dashboard with $0 / 0-token entries that say nothing useful.
+  if (result.turns.length === 0) {
+    if (new_offset > fromOffset) repo.setFileOffset(filePath, new_offset);
+    return;
+  }
 
   const sessionId = `${result.header.agent}:${result.header.native_session_id}`;
 
