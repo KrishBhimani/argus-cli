@@ -36,7 +36,14 @@ import Default from '../layouts/Default.astro';
 
   <div id="results"></div>
 
-  <style>
+  <!--
+    is:global is intentional. We render the result list with innerHTML, which
+    bypasses Astro's component-scoped class hashing — without is:global the
+    selectors below would never match the injected DOM. Class names are
+    namespaced (s-…) to keep them out of the global stylesheet's general
+    pool.
+  -->
+  <style is:global>
     .role-toggle {
       display: inline-flex;
       align-items: center;
@@ -44,62 +51,109 @@ import Default from '../layouts/Default.astro';
       cursor: pointer;
       color: var(--text-1);
     }
-    .result-card {
+
+    .s-session-card {
       background: var(--bg-1);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.85rem 1.05rem;
-      margin-bottom: 0.65rem;
-      transition: border-color 0.12s;
+      border-radius: 10px;
+      padding: 0;
+      margin-bottom: 0.85rem;
+      overflow: hidden;
     }
-    .result-card:hover { border-color: var(--accent); }
-    .result-meta {
+    .s-session-card.is-unlinked { border-style: dashed; }
+    .s-session-head {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 1rem;
-      font-size: 0.76rem;
-      color: var(--text-2);
-      margin-bottom: 0.35rem;
+      padding: 0.7rem 1rem;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.82rem;
+      flex-wrap: wrap;
     }
-    .role-pill {
+    .s-session-head .proj {
+      font-family: 'SF Mono', Consolas, monospace;
+      color: var(--text-0);
+      font-weight: 500;
+    }
+    .s-session-head .meta {
+      color: var(--text-2);
+      font-size: 0.75rem;
+    }
+    .s-session-head .open {
+      color: var(--accent);
+      font-size: 0.82rem;
+      flex-shrink: 0;
+    }
+    .s-session-head .count {
+      display: inline-block;
+      background: var(--accent-dim);
+      color: var(--accent);
+      padding: 0.05em 0.55em;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 500;
+      margin-left: 0.5rem;
+    }
+
+    .s-seg-list { padding: 0.4rem 0.4rem 0.6rem; }
+    .s-seg {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.7rem;
+      padding: 0.55rem 0.7rem;
+      border-radius: 6px;
+      align-items: start;
+    }
+    .s-seg + .s-seg { border-top: 1px solid var(--border); }
+    .s-seg:hover { background: rgba(255,255,255,0.015); }
+    .s-seg-role-col {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      align-items: flex-start;
+      padding-top: 0.1rem;
+      min-width: 92px;
+    }
+    .s-seg-snippet {
+      font-size: 0.88rem;
+      color: var(--text-0);
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .s-seg-snippet mark {
+      background: rgba(240, 136, 62, 0.28);
+      color: var(--text-0);
+      padding: 0 1px;
+      border-radius: 2px;
+    }
+    .s-seg-time { color: var(--text-2); font-size: 0.7rem; }
+    .s-pill {
       display: inline-block;
       padding: 0.05em 0.55em;
       border-radius: 4px;
       font-size: 0.7rem;
       font-weight: 500;
       letter-spacing: 0.02em;
-      text-transform: lowercase;
+      white-space: nowrap;
     }
-    .role-pill.role-prompt      { background: rgba(240,136,62,0.18); color: var(--accent); }
-    .role-pill.role-user        { background: rgba(126,231,135,0.16); color: var(--good); }
-    .role-pill.role-assistant   { background: rgba(88,166,255,0.16); color: var(--codex); }
-    .role-pill.role-thinking    { background: rgba(188,140,255,0.16); color: #bc8cff; }
-    .role-pill.role-tool_result { background: var(--bg-2); color: var(--text-2); }
-    .result-snippet {
-      font-size: 0.9rem;
-      color: var(--text-0);
-      white-space: pre-wrap;
-      word-break: break-word;
-      line-height: 1.45;
-    }
-    .result-snippet mark {
-      background: rgba(240, 136, 62, 0.28);
-      color: var(--text-0);
-      padding: 0 1px;
-      border-radius: 2px;
-    }
-    .result-actions { margin-top: 0.45rem; font-size: 0.78rem; }
-    .result-actions a { color: var(--accent); }
-    .result-actions .nolink { color: var(--text-2); font-style: italic; }
-    .pasted-tag {
+    .s-pill.role-prompt      { background: rgba(240,136,62,0.18); color: var(--accent); }
+    .s-pill.role-user        { background: rgba(126,231,135,0.16); color: var(--good); }
+    .s-pill.role-assistant   { background: rgba(88,166,255,0.16); color: var(--codex); }
+    .s-pill.role-thinking    { background: rgba(188,140,255,0.16); color: #bc8cff; }
+    .s-pill.role-tool_result { background: var(--bg-2); color: var(--text-2); }
+
+    .s-pasted-tag {
       display: inline-block;
       background: var(--bg-2);
       color: var(--text-2);
       padding: 0.05em 0.5em;
       border-radius: 4px;
-      font-size: 0.7rem;
-      margin-left: 0.5rem;
+      font-size: 0.68rem;
+      margin-top: 0.2rem;
     }
   </style>
 
@@ -128,23 +182,18 @@ import Default from '../layouts/Default.astro';
     function escapeHtml(s: string): string {
       return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
-
-    // Strip everything except <mark> and </mark> from a server-supplied
-    // snippet. Defense-in-depth: if a future server change ever leaks raw
-    // HTML through snippet(), the page won't render it.
     function safeSnippet(s: string): string {
       const open = '\x00MK_OPEN\x00';
       const close = '\x00MK_CLOSE\x00';
       const stripped = s.replace(/<mark>/g, open).replace(/<\/mark>/g, close);
       return escapeHtml(stripped).replace(new RegExp(open, 'g'), '<mark>').replace(new RegExp(close, 'g'), '</mark>');
     }
-
     function roleLabel(role: string): string {
       switch (role) {
         case 'prompt':      return 'you typed';
         case 'user':        return 'you said';
         case 'assistant':   return 'claude said';
-        case 'thinking':    return 'claude thinking';
+        case 'thinking':    return 'thinking';
         case 'tool_result': return 'tool output';
         default:            return role;
       }
@@ -155,38 +204,116 @@ import Default from '../layouts/Default.astro';
         .map(i => (i as HTMLInputElement).dataset.role!);
     }
 
-    function renderResults(d: { total: number; prompt_total: number; transcript_total: number; results: any[] }) {
+    type Result = {
+      kind: 'prompt' | 'transcript';
+      role: string;
+      timestamp_ms: number;
+      project_path: string | null;
+      text: string;
+      snippet: string;
+      pasted_chars: number;
+      session_id: string | null;
+    };
+
+    type Group = {
+      session_id: string | null;
+      project_path: string | null;
+      latest_ms: number;
+      earliest_ms: number;
+      hits: Result[];
+    };
+
+    // Group results by session_id so the UI shows one card per conversation
+    // with all its matching segments nested inside, instead of a flat list
+    // where the same session repeats over and over.
+    function groupBySession(results: Result[]): Group[] {
+      const map = new Map<string, Group>();
+      for (const r of results) {
+        // Unlinked prompts (no session match) collapse into a single
+        // "Unlinked" pseudo-group keyed by project so they aren't all
+        // smeared into one. Use a synthetic key that can't collide with
+        // a real session_id.
+        const key = r.session_id ?? `__unlinked__:${r.project_path ?? '_'}`;
+        let g = map.get(key);
+        if (!g) {
+          g = {
+            session_id: r.session_id,
+            project_path: r.project_path,
+            latest_ms: r.timestamp_ms,
+            earliest_ms: r.timestamp_ms,
+            hits: [],
+          };
+          map.set(key, g);
+        }
+        g.hits.push(r);
+        if (r.timestamp_ms > g.latest_ms) g.latest_ms = r.timestamp_ms;
+        if (r.timestamp_ms < g.earliest_ms) g.earliest_ms = r.timestamp_ms;
+      }
+      // Within each group, keep chronological order so a reader can scan
+      // top-to-bottom and follow the conversation.
+      for (const g of map.values()) {
+        g.hits.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+      }
+      // Across groups, most-recently-touched session first.
+      return [...map.values()].sort((a, b) => b.latest_ms - a.latest_ms);
+    }
+
+    function renderGroup(g: Group, q: string): string {
+      const proj = escapeHtml(projectBasename(g.project_path));
+      const when = g.latest_ms ? ago(new Date(g.latest_ms).toISOString()) : '';
+      const isUnlinked = !g.session_id;
+      const openHref = g.session_id
+        ? `/session?id=${encodeURIComponent(g.session_id)}${q ? '&q=' + encodeURIComponent(q) : ''}`
+        : null;
+
+      const head = `
+        <div class="s-session-head">
+          <div>
+            <span class="proj">${proj}</span>
+            <span class="count">${g.hits.length} match${g.hits.length === 1 ? '' : 'es'}</span>
+            <span class="meta" style="display:block;margin-top:0.15rem;">${when}${isUnlinked ? ' · no linked session' : ''}</span>
+          </div>
+          ${openHref ? `<a class="open" href="${openHref}">Open session →</a>` : ''}
+        </div>`;
+
+      const segs = g.hits.map(h => {
+        const ts = h.timestamp_ms ? new Date(h.timestamp_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+        return `
+          <div class="s-seg">
+            <div class="s-seg-role-col">
+              <span class="s-pill role-${h.role}">${roleLabel(h.role)}</span>
+              <span class="s-seg-time">${ts}</span>
+              ${h.pasted_chars > 0 ? `<span class="s-pasted-tag">+${bytesHuman(h.pasted_chars)} pasted</span>` : ''}
+            </div>
+            <div class="s-seg-snippet">${safeSnippet(h.snippet)}</div>
+          </div>`;
+      }).join('');
+
+      return `<div class="s-session-card${isUnlinked ? ' is-unlinked' : ''}">${head}<div class="s-seg-list">${segs}</div></div>`;
+    }
+
+    function renderResults(d: { total: number; prompt_total: number; transcript_total: number; results: Result[] }) {
       const totals = $('#totals');
-      if (qInput.value.trim()) {
+      const q = qInput.value.trim();
+      if (q) {
         totals.style.display = '';
-        totals.innerHTML = `${d.total.toLocaleString()} matches: <span style="color:var(--accent);">${d.prompt_total.toLocaleString()}</span> in your prompts, <span style="color:var(--codex);">${d.transcript_total.toLocaleString()}</span> in transcripts`;
+        const groups = groupBySession(d.results);
+        const sessionCount = groups.filter(g => g.session_id).length;
+        totals.innerHTML = `${d.total.toLocaleString()} matches across ${sessionCount} session${sessionCount === 1 ? '' : 's'} · `
+          + `<span style="color:var(--accent);">${d.prompt_total.toLocaleString()}</span> in your prompts, `
+          + `<span style="color:var(--codex);">${d.transcript_total.toLocaleString()}</span> in transcripts`;
       } else {
         totals.style.display = 'none';
       }
 
       if (d.results.length === 0) {
-        $('#results').innerHTML = qInput.value
+        $('#results').innerHTML = q
           ? '<div class="empty">No matches.</div>'
           : '<div class="empty">Type something to search across every prompt and every transcript.</div>';
         return;
       }
-      $('#results').innerHTML = d.results.map(r => `
-        <div class="result-card">
-          <div class="result-meta">
-            <span>
-              <span class="role-pill role-${r.role}">${roleLabel(r.role)}</span>
-              <span style="margin-left:0.5rem;">${ago(new Date(r.timestamp_ms).toISOString())} · ${escapeHtml(projectBasename(r.project_path))}</span>
-            </span>
-            <span>${r.pasted_chars > 0 ? `<span class="pasted-tag">+ ${bytesHuman(r.pasted_chars)} pasted</span>` : ''}</span>
-          </div>
-          <div class="result-snippet">${safeSnippet(r.snippet)}</div>
-          <div class="result-actions">
-            ${r.session_id
-              ? `<a href="/session?id=${encodeURIComponent(r.session_id)}${qInput.value.trim() ? '&q=' + encodeURIComponent(qInput.value.trim()) : ''}">→ Open session</a>`
-              : '<span class="nolink">(no linked session)</span>'}
-          </div>
-        </div>
-      `).join('');
+      const groups = groupBySession(d.results);
+      $('#results').innerHTML = groups.map(g => renderGroup(g, q)).join('');
     }
 
     async function loadProjects() {
@@ -209,7 +336,9 @@ import Default from '../layouts/Default.astro';
       const roles = selectedRoles();
 
       try {
-        const d = await api.search({ q, limit: 100, project, includeSlash, roles });
+        // Higher limit when we're going to group, since most matches will
+        // collapse into a few sessions anyway.
+        const d = await api.search({ q, limit: 200, project, includeSlash, roles });
         renderResults(d);
       } catch {
         $('#results').innerHTML = '<div class="empty">Search failed.</div>';

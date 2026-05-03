@@ -76,11 +76,11 @@ import{a as _}from"./api.CtD6fQqN.js";import{u as p,t as L,n as a,d as C}from"./
             </table>`:'<p class="empty">No turns recorded for this session.</p>'}
           </div>
         `;const c=document.getElementById("seg-q"),i=document.getElementById("seg-results"),g=document.getElementById("seg-count");let v;async function y(){const s=c.value.trim();if(!s){i.innerHTML="",g.textContent="";return}try{const l=await _.sessionTranscriptSearch(u,s,200);if(g.textContent=`${l.total} match${l.total===1?"":"es"}`,l.segments.length===0){i.innerHTML='<p class="empty" style="margin:0.5rem 0;">No matches in this session.</p>';return}const w=l.segments.slice().sort((r,S)=>Date.parse(r.timestamp)-Date.parse(S.timestamp));i.innerHTML=w.map(r=>`
-              <div class="seg-card">
-                <div class="seg-meta">
-                  <span class="role-pill role-${r.role}">${D(r.role)}</span>
+              <div class="sd-seg-card">
+                <div class="sd-seg-meta">
+                  <span class="sd-role-pill role-${r.role}">${D(r.role)}</span>
                   <span style="margin-left:0.5rem;">${f(r.timestamp)}</span>
                 </div>
-                <div class="seg-snippet">${M(r.snippet)}</div>
+                <div class="sd-seg-snippet">${M(r.snippet)}</div>
               </div>
             `).join("")}catch{i.innerHTML='<p class="empty">Search failed.</p>'}}c.addEventListener("input",()=>{clearTimeout(v),v=setTimeout(y,150)}),b&&(c.value=b,y())}):h.innerHTML='<p class="empty">No session id.</p>';

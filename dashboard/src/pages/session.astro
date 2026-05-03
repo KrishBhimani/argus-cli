@@ -7,43 +7,49 @@ import Default from '../layouts/Default.astro';
     <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
   </div>
 
-  <style>
-    .seg-card {
+  <!--
+    is:global so the styles apply to the result list we render via innerHTML
+    (Astro's component-scoped styles wouldn't reach those nodes). Class
+    names are namespaced (sd-…) to keep them out of the global pool.
+  -->
+  <style is:global>
+    .sd-seg-card {
       background: var(--bg-1);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 0.75rem 1rem;
       margin-bottom: 0.55rem;
     }
-    .seg-meta {
+    .sd-seg-meta {
       font-size: 0.74rem;
       color: var(--text-2);
       margin-bottom: 0.3rem;
     }
-    .seg-snippet {
+    .sd-seg-snippet {
       font-size: 0.88rem;
       color: var(--text-0);
       white-space: pre-wrap;
       word-break: break-word;
       line-height: 1.4;
+      overflow-wrap: anywhere;
     }
-    .seg-snippet mark {
+    .sd-seg-snippet mark {
       background: rgba(240, 136, 62, 0.28);
       color: var(--text-0);
       padding: 0 1px;
       border-radius: 2px;
     }
-    .role-pill {
+    .sd-role-pill {
       display: inline-block;
       padding: 0.05em 0.55em;
       border-radius: 4px;
       font-size: 0.7rem;
       font-weight: 500;
     }
-    .role-pill.role-user        { background: rgba(126,231,135,0.16); color: var(--good); }
-    .role-pill.role-assistant   { background: rgba(88,166,255,0.16); color: var(--codex); }
-    .role-pill.role-thinking    { background: rgba(188,140,255,0.16); color: #bc8cff; }
-    .role-pill.role-tool_result { background: var(--bg-2); color: var(--text-2); }
+    .sd-role-pill.role-user        { background: rgba(126,231,135,0.16); color: var(--good); }
+    .sd-role-pill.role-assistant   { background: rgba(88,166,255,0.16); color: var(--codex); }
+    .sd-role-pill.role-thinking    { background: rgba(188,140,255,0.16); color: #bc8cff; }
+    .sd-role-pill.role-tool_result { background: var(--bg-2); color: var(--text-2); }
   </style>
 
   <script>
@@ -205,12 +211,12 @@ import Default from '../layouts/Default.astro';
             const sorted = r.segments.slice().sort((a, b) =>
               Date.parse(a.timestamp) - Date.parse(b.timestamp));
             segResults.innerHTML = sorted.map(s => `
-              <div class="seg-card">
-                <div class="seg-meta">
-                  <span class="role-pill role-${s.role}">${roleLabel(s.role)}</span>
+              <div class="sd-seg-card">
+                <div class="sd-seg-meta">
+                  <span class="sd-role-pill role-${s.role}">${roleLabel(s.role)}</span>
                   <span style="margin-left:0.5rem;">${fmtLocalTime(s.timestamp)}</span>
                 </div>
-                <div class="seg-snippet">${safeSnippet(s.snippet)}</div>
+                <div class="sd-seg-snippet">${safeSnippet(s.snippet)}</div>
               </div>
             `).join('');
           } catch {
