@@ -75,8 +75,10 @@ export async function ingestFile(adapter: Adapter, filePath: string, repo: Repos
     repo.upsertToolCalls(result.tool_calls.map(r => toToolCall(r, sessionId)));
   }
 
-  // Same for transcript segments (Slice 2).
-  if (result.segments && result.segments.length) {
+  // Same for transcript segments (Slice 2). Gated on the
+  // enable_transcript_search flag so users who haven't opted in pay no
+  // disk cost for full-text search of session bodies.
+  if (result.segments && result.segments.length && repo.isSearchIndexingEnabled()) {
     repo.upsertTranscriptSegments(result.segments.map(r => toSegment(r, sessionId)));
   }
 
@@ -98,7 +100,7 @@ export async function ingestFile(adapter: Adapter, filePath: string, repo: Repos
       if (subResult.result.tool_calls && subResult.result.tool_calls.length) {
         repo.upsertToolCalls(subResult.result.tool_calls.map(r => toToolCall(r, subSessionId)));
       }
-      if (subResult.result.segments && subResult.result.segments.length) {
+      if (subResult.result.segments && subResult.result.segments.length && repo.isSearchIndexingEnabled()) {
         repo.upsertTranscriptSegments(subResult.result.segments.map(r => toSegment(r, subSessionId)));
       }
 

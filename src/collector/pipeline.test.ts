@@ -121,4 +121,36 @@ describe('ingestFile pipeline', () => {
     expect(list[0].total_cost_usd).toBeGreaterThan(0);
     expect(repo.getFileOffset(sessionFile)).toBeGreaterThan(0);
   });
+
+  it('skips writing transcript segments when search indexing flag is OFF', async () => {
+    const claudeRoot = join(dir, '.claude');
+    const proj = join(claudeRoot, 'projects', 'C--proj');
+    mkdirSync(proj, { recursive: true });
+    const sessionFile = join(proj, 'sess1.jsonl');
+    writeFileSync(sessionFile, JSON.stringify({
+      type: 'assistant', sessionId: 'sess1', uuid: 'u1', timestamp: '2026-05-01T00:00:00Z',
+      cwd: 'C:/proj', version: '2.1.94', userType: 'external', entrypoint: 'cli',
+      message: {
+        id: 'm1', model: 'claude-opus-4-7', role: 'assistant',
+        content: [{ type: 'text', text: 'this is some assistant text we would normally index' }],
+        usage: { input_tokens: 100, output_tokens: 200, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      },
+    }) + '\n');
+
+    const db = openDb(join(dir, 'argus.db'));
+    const repo = new Repository(db);
+    const adapter = new ClaudeCodeAdapter(claudeRoot);
+    const table = await loadPricingTable();
+
+    // Default for fresh DB is OFF — confirm the gating works.
+    expect(repo.isSearchIndexingEnabled()).toBe(false);
+    await ingestFile(adapter, sessionFile, repo, table);
+    expect(repo.segmentStats().total).toBe(0);
+
+    // Flip on, re-ingest from offset 0 — segments should populate.
+    repo.setSearchIndexingEnabled(true);
+    repo.setFileOffset(sessionFile, 0);
+    await ingestFile(adapter, sessionFile, repo, table);
+    expect(repo.segmentStats().total).toBe(1);
+  });
 });

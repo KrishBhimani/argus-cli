@@ -5,6 +5,23 @@ import Default from '../layouts/Default.astro';
   <h2>Settings</h2>
   <div class="grid-2">
     <div>
+      <div class="card" id="search-card">
+        <h3>Search indexing</h3>
+        <p style="color:var(--text-1);font-size:0.85rem;margin-top:0;">
+          Index every assistant response, your replies, and tool output for full-text
+          search. 100% local — SQLite FTS5, no embeddings, no API calls. Costs disk space
+          (~0.5 MB per session on average), so it's opt-in.
+        </p>
+
+        <div id="search-status-line" style="display:flex;align-items:center;gap:0.6rem;
+              padding:0.7rem 0;border-top:1px solid var(--border);margin-top:0.6rem;">
+          <span class="skel" style="width:8em;height:1em;"></span>
+        </div>
+
+        <div id="search-actions" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.4rem;"></div>
+        <div id="search-progress" style="display:none;margin-top:0.6rem;color:var(--text-2);font-size:0.82rem;"></div>
+      </div>
+
       <div class="card">
         <h3>Pricing</h3>
         <p>Pricing table version: <code id="pv">…</code></p>
@@ -41,19 +58,100 @@ import Default from '../layouts/Default.astro';
 
   <script>
     import { api } from '../scripts/api';
+
+    const $ = (s: string) => document.querySelector(s) as HTMLElement;
+
     async function load() {
       const [p, e, s] = await Promise.all([
         api.pricing(),
         api.parseErrors(),
         fetch('/api/ingest/status').then(r => r.json()),
       ]);
-      document.getElementById('pv')!.textContent = p.version;
-      document.getElementById('status')!.textContent = JSON.stringify(s, null, 2);
-      document.getElementById('err-count')!.textContent = e.errors.length === 0
+      $('#pv').textContent = p.version;
+      $('#status').textContent = JSON.stringify(s, null, 2);
+      $('#err-count').textContent = e.errors.length === 0
         ? 'No parse errors recorded. Healthy.'
         : `${e.errors.length} recent parse error${e.errors.length === 1 ? '' : 's'}.`;
-      document.getElementById('errs')!.textContent = e.errors.length === 0 ? '' : JSON.stringify(e.errors, null, 2);
+      $('#errs').textContent = e.errors.length === 0 ? '' : JSON.stringify(e.errors, null, 2);
     }
+
+    function pillBadge(label: string, color: string): string {
+      return `<span style="display:inline-flex;align-items:center;gap:0.35em;
+        padding:0.15em 0.6em;border-radius:999px;background:${color}22;color:${color};
+        font-size:0.78rem;font-weight:500;">
+        <span style="width:6px;height:6px;border-radius:50%;background:${color};"></span>
+        ${label}</span>`;
+    }
+
+    async function loadSearchStatus() {
+      let s;
+      try { s = await api.searchIndexStatus(); } catch { return; }
+
+      const statusLine = $('#search-status-line');
+      const actions = $('#search-actions');
+      const progress = $('#search-progress');
+
+      const badge = s.enabled
+        ? pillBadge('Enabled', '#7ee787')
+        : pillBadge('Disabled', '#6b7585');
+      const statsText = s.segment_count > 0
+        ? `${s.segment_count.toLocaleString()} segments across ${s.indexed_sessions} session${s.indexed_sessions === 1 ? '' : 's'}`
+        : 'no data indexed yet';
+
+      statusLine.innerHTML = `${badge}<span style="color:var(--text-2);font-size:0.85rem;">${statsText}</span>`;
+
+      // Backfill progress takes precedence over the stats text — when one
+      // is running, show it inline so the user sees what the "Enable"
+      // click is doing.
+      if (s.backfill.in_progress) {
+        progress.style.display = '';
+        progress.textContent = `Indexing… ${s.backfill.processed}/${s.backfill.total} sessions`;
+      } else {
+        progress.style.display = 'none';
+      }
+
+      // Action buttons reflect current state. Buttons that are
+      // pointless in the current state are simply omitted instead of
+      // disabled — fewer affordances to mis-click.
+      const buttons: string[] = [];
+      if (!s.enabled) {
+        buttons.push(`<button id="btn-enable" style="border-color:var(--accent);color:var(--accent);">Enable indexing</button>`);
+      } else {
+        buttons.push(`<button id="btn-disable">Disable indexing</button>`);
+      }
+      if (s.segment_count > 0) {
+        buttons.push(`<button id="btn-clear" style="border-color:var(--bad);color:var(--bad);">Clear indexed data</button>`);
+      }
+      actions.innerHTML = buttons.join('');
+
+      const enable = document.getElementById('btn-enable');
+      if (enable) enable.addEventListener('click', async () => {
+        enable.setAttribute('disabled', 'true');
+        enable.textContent = 'Enabling…';
+        await api.searchIndexEnable();
+        await loadSearchStatus();
+      });
+
+      const disable = document.getElementById('btn-disable');
+      if (disable) disable.addEventListener('click', async () => {
+        if (!confirm('Stop indexing new sessions? Existing indexed data stays on disk and can be searched again if you re-enable.')) return;
+        await api.searchIndexDisable();
+        await loadSearchStatus();
+      });
+
+      const clear = document.getElementById('btn-clear');
+      if (clear) clear.addEventListener('click', async () => {
+        if (!confirm(`Delete all ${s.segment_count.toLocaleString()} indexed segments and disable indexing? This cannot be undone — re-enabling will require re-indexing from your sessions.`)) return;
+        await api.searchIndexClear();
+        await loadSearchStatus();
+      });
+    }
+
     load();
+    loadSearchStatus();
+    // While a backfill is running, refresh the status line every 2s so
+    // the progress text stays current. We can't tell up front whether
+    // one is in progress, so always poll cheaply.
+    setInterval(loadSearchStatus, 2000);
   </script>
 </Default>

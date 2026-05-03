@@ -38,7 +38,14 @@ program.command('start')
     console.log(`Argus: foreground ingest complete (${status().processed}/${status().total} files), starting watcher...`);
     await startWatcher(adapters, repo, table);
     const dashDir = resolve(__dirname, '../dashboard-dist');
-    const { url } = await startServer(repo, { pricingTableVersion: table.version, ingestStatus: status, dashboardDir: dashDir, port: Number(port) });
+    const { url } = await startServer(repo, {
+      pricingTableVersion: table.version,
+      ingestStatus: status,
+      dashboardDir: dashDir,
+      port: Number(port),
+      adapters,
+      pricingTable: table,
+    });
     console.log(`Argus running at ${url}`);
     try { await open(url); } catch { /* ignore */ }
   });
@@ -71,6 +78,92 @@ pricingCmd.command('refresh')
     } else {
       console.log('Cancelled.');
     }
+    process.exit(0);
+  });
+
+// ─── Slice 3: opt-in transcript indexing ────────────────────────────────
+//
+// Search indexing covers full-text search of every assistant response,
+// every user reply, and tool output across every session — far more than
+// the prompt history alone. It costs disk space, so we expose it as an
+// explicit toggle here. The dashboard's Settings page wraps the same
+// endpoints; both are equivalent.
+
+const searchCmd = program.command('search').description('Manage transcript-search indexing');
+
+searchCmd.command('status')
+  .option('--data-dir <dir>', 'data dir', join(homedir(), '.argus'))
+  .description('Show whether transcript indexing is on, and how much is indexed')
+  .action(async ({ dataDir }) => {
+    const db = openDb(join(dataDir, 'argus.db'));
+    const repo = new Repository(db);
+    const enabled = repo.isSearchIndexingEnabled();
+    const segs = repo.segmentStats();
+    console.log(`Status:   ${enabled ? 'ENABLED' : 'disabled'}`);
+    console.log(`Indexed:  ${segs.total.toLocaleString()} segments across ${segs.sessions} sessions`);
+    if (!enabled && segs.total > 0) {
+      console.log(`Note:     existing segments stay on disk but are hidden from search`);
+      console.log(`          until you re-enable. Use 'argus search clear' to wipe them.`);
+    }
+    process.exit(0);
+  });
+
+searchCmd.command('enable')
+  .option('--data-dir <dir>', 'data dir', join(homedir(), '.argus'))
+  .description('Turn on transcript indexing and backfill historical sessions')
+  .action(async ({ dataDir }) => {
+    const db = openDb(join(dataDir, 'argus.db'));
+    const repo = new Repository(db);
+    if (repo.isSearchIndexingEnabled()) {
+      console.log('Already enabled.');
+      const segs = repo.segmentStats();
+      console.log(`Indexed: ${segs.total.toLocaleString()} segments across ${segs.sessions} sessions`);
+      process.exit(0);
+    }
+    repo.setSearchIndexingEnabled(true);
+    console.log('Enabled. Run `argus start` to backfill — historical sessions will');
+    console.log('index in the background. New sessions are indexed automatically.');
+    process.exit(0);
+  });
+
+searchCmd.command('disable')
+  .option('--data-dir <dir>', 'data dir', join(homedir(), '.argus'))
+  .description('Stop indexing new sessions; existing segments stay on disk but are hidden')
+  .action(async ({ dataDir }) => {
+    const db = openDb(join(dataDir, 'argus.db'));
+    const repo = new Repository(db);
+    repo.setSearchIndexingEnabled(false);
+    const segs = repo.segmentStats();
+    console.log('Disabled.');
+    if (segs.total > 0) {
+      console.log(`${segs.total.toLocaleString()} existing segments are still on disk but hidden`);
+      console.log('from search. Run `argus search clear` to wipe them.');
+    }
+    process.exit(0);
+  });
+
+searchCmd.command('clear')
+  .option('--data-dir <dir>', 'data dir', join(homedir(), '.argus'))
+  .option('-y, --yes', 'skip confirmation')
+  .description('Delete all indexed segments and turn off indexing')
+  .action(async ({ dataDir, yes }) => {
+    const db = openDb(join(dataDir, 'argus.db'));
+    const repo = new Repository(db);
+    const segs = repo.segmentStats();
+    if (segs.total === 0) {
+      console.log('Nothing to clear (0 indexed segments).');
+      repo.setSearchIndexingEnabled(false);
+      process.exit(0);
+    }
+    if (!yes) {
+      process.stdout.write(`Delete ${segs.total.toLocaleString()} indexed segments? [y/N] `);
+      const ans = await new Promise<string>(r => process.stdin.once('data', d => r(d.toString().trim())));
+      process.stdin.pause();
+      if (ans.toLowerCase() !== 'y') { console.log('Cancelled.'); process.exit(0); }
+    }
+    repo.clearAllSegments();
+    repo.setSearchIndexingEnabled(false);
+    console.log(`Deleted ${segs.total.toLocaleString()} segments.`);
     process.exit(0);
   });
 

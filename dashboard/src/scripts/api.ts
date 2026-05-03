@@ -108,6 +108,16 @@ export const api = {
     return fetch(`/api/sessions/${encodeURIComponent(id)}/transcript?${sp.toString()}`).then(r => r.json() as Promise<{
       total: number;
       segments: Array<{ uid: string; timestamp: string; role: string; text: string; snippet: string }>;
+      search_indexing_enabled?: boolean;
     }>);
   },
+  searchIndexStatus: () => fetch('/api/search-index/status').then(r => r.json() as Promise<{
+    enabled: boolean;
+    segment_count: number;
+    indexed_sessions: number;
+    backfill: { in_progress: boolean; processed: number; total: number; started_at_ms: number | null; finished_at_ms: number | null };
+  }>),
+  searchIndexEnable: () => fetch('/api/search-index/enable', { method: 'POST' }).then(r => r.json()),
+  searchIndexDisable: () => fetch('/api/search-index/disable', { method: 'POST' }).then(r => r.json()),
+  searchIndexClear: () => fetch('/api/search-index/clear', { method: 'POST' }).then(r => r.json()),
 };

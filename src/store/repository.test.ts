@@ -177,4 +177,42 @@ describe('Repository', () => {
     const r = repo.searchTranscripts({ q: 'updated', limit: 10 });
     expect(r.total).toBe(1);
   });
+
+  it('search indexing flag defaults OFF on a fresh DB', () => {
+    expect(repo.isSearchIndexingEnabled()).toBe(false);
+  });
+
+  it('search indexing flag defaults ON when segments already exist (existing-install migration)', () => {
+    repo.upsertSession(SESSION);
+    // Simulate an old install that already has segments (from before the
+    // flag existed). isSearchIndexingEnabled should detect this and
+    // default to true so existing users keep working.
+    repo.upsertTranscriptSegments([
+      { uid: 'claude_code:s1:u1:0', session_id: SESSION.id, timestamp: '2026-05-01T10:00:00Z', role: 'user', text: 'data' },
+    ]);
+    // NB: the smart-default logic only fires when the key is absent. We
+    // wipe the key here to simulate the migration path.
+    (repo as any).db.exec(`DELETE FROM app_meta WHERE key = 'enable_transcript_search'`);
+    expect(repo.isSearchIndexingEnabled()).toBe(true);
+  });
+
+  it('setSearchIndexingEnabled persists across reads', () => {
+    repo.setSearchIndexingEnabled(true);
+    expect(repo.isSearchIndexingEnabled()).toBe(true);
+    repo.setSearchIndexingEnabled(false);
+    expect(repo.isSearchIndexingEnabled()).toBe(false);
+  });
+
+  it('clearAllSegments wipes table and FTS index in one shot', () => {
+    repo.upsertSession(SESSION);
+    repo.upsertTranscriptSegments([
+      { uid: 'claude_code:s1:a:0', session_id: SESSION.id, timestamp: '2026-05-01T10:00:00Z', role: 'assistant', text: 'hello' },
+      { uid: 'claude_code:s1:b:0', session_id: SESSION.id, timestamp: '2026-05-01T10:01:00Z', role: 'user', text: 'world' },
+    ]);
+    expect(repo.segmentStats().total).toBe(2);
+    repo.clearAllSegments();
+    expect(repo.segmentStats().total).toBe(0);
+    // FTS5 should also be empty
+    expect(repo.searchTranscripts({ q: 'hello', limit: 10 }).total).toBe(0);
+  });
 });

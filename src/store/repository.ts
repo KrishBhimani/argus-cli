@@ -417,4 +417,48 @@ export class Repository {
     `).all() as any[];
     return rows.map(r => r.project_path);
   }
+
+  // Total segment count and distinct sessions covered. Used by the
+  // Settings page to show "what would you lose if you disable / clear".
+  segmentStats(): { total: number; sessions: number } {
+    const r = this.db.prepare(`
+      SELECT COUNT(*) AS total, COUNT(DISTINCT session_id) AS sessions
+      FROM transcript_segments
+    `).get() as any;
+    return { total: r?.total ?? 0, sessions: r?.sessions ?? 0 };
+  }
+
+  // Drop every segment row (and through the FTS5 sync trigger, every FTS
+  // row). Used by the "Clear" button in Settings and `argus search clear`.
+  clearAllSegments(): void {
+    this.db.exec(`DELETE FROM transcript_segments;`);
+  }
+
+  // ─── App-meta-backed settings ──────────────────────────────────────────
+
+  // Search indexing is opt-in: a fresh install starts with it OFF so the
+  // user doesn't get surprise disk usage. An EXISTING install where
+  // segments are already present gets ON as the migration default — we
+  // assume anyone who already had the feature wants to keep it.
+  //
+  // The setting lives in app_meta with key 'enable_transcript_search'
+  // and value '1' or '0'. On first read after upgrade, if the key is
+  // missing we synthesize a default from segmentStats() and persist it
+  // so subsequent reads are direct.
+  isSearchIndexingEnabled(): boolean {
+    const row = this.db.prepare(`SELECT value FROM app_meta WHERE key = 'enable_transcript_search'`).get() as
+      | { value: string }
+      | undefined;
+    if (row) return row.value === '1';
+    // Migration default: ON if segments already exist, OFF otherwise.
+    const hasData = this.segmentStats().total > 0;
+    this.setSearchIndexingEnabled(hasData);
+    return hasData;
+  }
+
+  setSearchIndexingEnabled(enabled: boolean): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO app_meta (key, value) VALUES ('enable_transcript_search', ?)`,
+    ).run(enabled ? '1' : '0');
+  }
 }

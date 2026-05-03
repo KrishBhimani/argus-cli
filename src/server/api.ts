@@ -1,8 +1,16 @@
 import { Hono } from 'hono';
 import type { Repository } from '../store/repository.js';
 import type { IngestStatus } from '../collector/first_run.js';
+import type { Adapter } from '../adapters/adapter.js';
+import type { PricingTable } from '../pricing/types.js';
+import { runSegmentBackfill, getSearchBackfillStatus } from '../collector/search_backfill.js';
 
-export interface ApiDeps { pricingTableVersion: string; ingestStatus: () => IngestStatus; }
+export interface ApiDeps {
+  pricingTableVersion: string;
+  ingestStatus: () => IngestStatus;
+  adapters: Adapter[];
+  pricingTable: PricingTable;
+}
 
 const WINDOWS: Record<string, number | null> = { 'today': 1, '7d': 7, '30d': 30, 'all': null };
 
@@ -217,6 +225,13 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
   // "Claude said" from "tool output". When q is empty we return prompts
   // recents only (transcripts are huge — chronological browsing is
   // session-scoped, not global).
+  //
+  // When transcript indexing is OFF, the transcripts portion of the
+  // response is always empty regardless of `roles=` — searching data
+  // that the user has explicitly opted out of would surprise them.
+  // (Existing rows aren't deleted automatically when toggling off, but
+  // they're hidden from search until re-enabled. `argus search clear`
+  // wipes them.)
   app.get('/api/search', (c) => {
     const q = (c.req.query('q') ?? '').trim();
     const limit = Math.min(Number(c.req.query('limit') ?? 50), 200);
@@ -229,6 +244,7 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     const transcriptRoles = wantedRoles
       ? wantedRoles.filter(r => r !== 'prompt')
       : ['user', 'assistant', 'thinking', 'tool_result'];
+    const searchEnabled = repo.isSearchIndexingEnabled();
 
     type Result = {
       kind: 'prompt' | 'transcript';
@@ -269,8 +285,9 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     }
 
     // Transcripts side. Only meaningful when q is non-empty (chronological
-    // browse over millions of segments isn't a useful product).
-    if (q && transcriptRoles.length) {
+    // browse over millions of segments isn't a useful product) AND the
+    // indexing flag is on.
+    if (q && transcriptRoles.length && searchEnabled) {
       let tr;
       try {
         tr = repo.searchTranscripts({ q, limit, project, roles: transcriptRoles });
@@ -305,18 +322,20 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
       total: promptTotal + transcriptTotal,
       prompt_total: promptTotal,
       transcript_total: transcriptTotal,
+      search_indexing_enabled: searchEnabled,
       results: results.slice(0, limit),
     });
   });
 
   // Per-session transcript search. The session detail page calls this with
   // its own session id; q is required (without it the page just shows the
-  // turn list as before).
+  // turn list as before). Same opt-in rule as /api/search.
   app.get('/api/sessions/:id/transcript', (c) => {
     const id = c.req.param('id');
     const q = (c.req.query('q') ?? '').trim();
     const limit = Math.min(Number(c.req.query('limit') ?? 100), 500);
-    if (!q) return c.json({ total: 0, segments: [] });
+    if (!q) return c.json({ total: 0, segments: [], search_indexing_enabled: repo.isSearchIndexingEnabled() });
+    if (!repo.isSearchIndexingEnabled()) return c.json({ total: 0, segments: [], search_indexing_enabled: false });
     let r;
     try {
       r = repo.searchTranscripts({ q, limit, sessionId: id });
@@ -333,6 +352,52 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
       snippet: row.snippet,
     }));
     return c.json({ total: r.total, segments });
+  });
+
+  // ─── Slice 3: opt-in transcript indexing ───────────────────────────────
+
+  // Status — enabled flag, on-disk segment count, distinct sessions
+  // covered, and the in-progress backfill (if any). Drives the toggle
+  // and stats on the Settings page.
+  app.get('/api/search-index/status', (c) => {
+    const enabled = repo.isSearchIndexingEnabled();
+    const segs = repo.segmentStats();
+    return c.json({
+      enabled,
+      segment_count: segs.total,
+      indexed_sessions: segs.sessions,
+      backfill: getSearchBackfillStatus(),
+    });
+  });
+
+  // Toggle on. Sets the flag and immediately kicks off a background
+  // backfill of any sessions that don't have segments yet. Returns
+  // before the backfill finishes so the UI stays responsive — the
+  // status endpoint can be polled to follow progress.
+  app.post('/api/search-index/enable', async (c) => {
+    repo.setSearchIndexingEnabled(true);
+    // Fire-and-forget; runSegmentBackfill is internally async and
+    // updates a process-local progress object that /status reads.
+    runSegmentBackfill(deps.adapters, repo, deps.pricingTable).catch(() => { /* logged via parse_errors */ });
+    return c.json({ enabled: true, backfill: getSearchBackfillStatus() });
+  });
+
+  // Toggle off. Existing segments are NOT deleted — they stay on disk
+  // and remain queryable if the flag is flipped back on. The pipeline
+  // and backfill paths both check the flag, so no new segments will be
+  // written until re-enabled. Use /clear to also wipe existing data.
+  app.post('/api/search-index/disable', (c) => {
+    repo.setSearchIndexingEnabled(false);
+    return c.json({ enabled: false });
+  });
+
+  // Wipe + disable. Drops every transcript_segments row (and through
+  // the FTS5 sync trigger, every FTS row) and turns the flag off.
+  // Idempotent; safe to call repeatedly.
+  app.post('/api/search-index/clear', (c) => {
+    repo.clearAllSegments();
+    repo.setSearchIndexingEnabled(false);
+    return c.json({ enabled: false, cleared: true });
   });
 
   app.get('/api/ingest/status', (c) => c.json(deps.ingestStatus()));

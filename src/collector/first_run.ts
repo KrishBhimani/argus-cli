@@ -88,16 +88,24 @@ export function runFirstPassIngest(adapters: Adapter[], repo: Repository, table:
 }
 
 // Re-ingest sessions that don't yet have any derived data (tool_calls
-// rows or transcript_segments rows). We reset their byte offset to 0
-// and let the normal pipeline re-walk; existing turns upsert in place
-// (no double-count) and tool_calls/segments populate as a side effect.
-// Top-level sessions only — sub-agent files are walked as part of their
-// parent's re-ingest. Cap at 200 candidates total so this never
-// dominates the background phase on a fresh upgrade.
+// rows, or — when search indexing is enabled — transcript_segments
+// rows). We reset their byte offset to 0 and let the normal pipeline
+// re-walk; existing turns upsert in place (no double-count) and the
+// derived data populates as a side effect. Top-level sessions only —
+// sub-agent files are walked as part of their parent's re-ingest.
+// Cap at 200 candidates total so this never dominates the background
+// phase on a fresh upgrade.
+//
+// Segments are only considered "missing-and-worth-fixing" when the
+// enable_transcript_search flag is on. With the flag off, the pipeline
+// would skip the segment writes anyway, so re-walking the file for
+// segments alone would be pointless work.
 async function backfillMissingDerivedData(adapters: Adapter[], repo: Repository, table: PricingTable): Promise<void> {
   const missingTools = repo.sessionsMissingToolCalls(200);
-  const missingSegs = repo.sessionsMissingSegments(200);
-  const ids = new Set<string>([...missingTools.map(c => c.id), ...missingSegs.map(c => c.id)]);
+  const ids = new Set<string>(missingTools.map(c => c.id));
+  if (repo.isSearchIndexingEnabled()) {
+    for (const c of repo.sessionsMissingSegments(200)) ids.add(c.id);
+  }
   const candidates = [...ids].slice(0, 200).map(id => ({ id }));
   if (candidates.length === 0) return;
 

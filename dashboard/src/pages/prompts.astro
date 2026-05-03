@@ -9,6 +9,21 @@ import Default from '../layouts/Default.astro';
     embeddings, no API calls.
   </p>
 
+  <!--
+    Banner shown when transcript indexing is off. Hits /api/search-index/status
+    on load and inserts itself only when needed, so the page stays clean for
+    the common (enabled) case.
+  -->
+  <div id="search-disabled-banner" style="display:none;
+    background:var(--bg-1);border:1px solid var(--warn);border-left-width:4px;
+    border-radius:6px;padding:0.85rem 1.05rem;margin-bottom:1rem;
+    color:var(--text-1);font-size:0.88rem;">
+    <strong style="color:var(--warn);">Transcript indexing is off.</strong>
+    Searching <em>only</em> your typed prompts.
+    <a href="/settings" style="color:var(--accent);">Enable in Settings</a> to also
+    search assistant responses, your replies, and tool output.
+  </div>
+
   <div class="card" style="margin-bottom:1rem;display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
     <input id="q" type="text" placeholder="Search…"
            style="flex:1;min-width:240px;background:var(--bg-2);color:var(--text-0);
@@ -328,6 +343,17 @@ import Default from '../layouts/Default.astro';
       } catch { /* ignore */ }
     }
 
+    // Show / hide the "indexing is off" banner based on the persisted
+    // flag. Done once on page load — we don't need to react to toggles
+    // happening in another tab; refreshing the page is enough.
+    async function loadIndexBanner() {
+      try {
+        const s = await api.searchIndexStatus();
+        const banner = document.getElementById('search-disabled-banner')!;
+        banner.style.display = s.enabled ? 'none' : '';
+      } catch { /* ignore */ }
+    }
+
     let debounceTimer: any;
     async function refresh() {
       const q = qInput.value.trim();
@@ -356,6 +382,7 @@ import Default from '../layouts/Default.astro';
     $$('.role-toggle input').forEach(el => el.addEventListener('change', refresh));
 
     loadProjects();
+    loadIndexBanner();
     refresh();
   </script>
 </Default>
