@@ -10,11 +10,37 @@
     "dist",
     "pricing",
     "dashboard-dist",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
   ],
   "engines": {
     "node": ">=22.0.0"
   },
+  "license": "MIT",
+  "author": "Krish Bhimani",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KrishBhimani/argus-cli.git"
+  },
+  "homepage": "https://github.com/KrishBhimani/argus-cli#readme",
+  "bugs": {
+    "url": "https://github.com/KrishBhimani/argus-cli/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "cli",
+    "dashboard",
+    "analytics",
+    "tokens",
+    "cost",
+    "usage",
+    "llm",
+    "ai-tools",
+    "local-first"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run build:dashboard",
     "build:dashboard": "cp dashboard/src/styles/global.css dashboard/public/styles/global.css && cd dashboard && npm run build && cd .. && rm -rf dashboard-dist && cp -r dashboard/dist dashboard-dist",

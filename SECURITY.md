@@ -1,0 +1,88 @@
+# Security Policy
+
+## Reporting a vulnerability
+
+If you find a security issue in Argus, please **don't open a public
+GitHub issue**. Instead, one of:
+
+- Open a private [GitHub Security Advisory](https://github.com/KrishBhimani/argus-cli/security/advisories/new) on the repository, or
+- Email the maintainer (see commit history for an address).
+
+I'll respond within a few days. Please include enough detail to
+reproduce — a proof-of-concept JSONL fixture, a curl command, or a
+repro repo. If the issue is a path traversal / file-disclosure bug,
+**do not include the actual contents of any file you were able to
+read** in the report.
+
+## Supported versions
+
+Argus is pre-1.0. Only the **latest published version** receives
+security fixes. Pinning to an older 0.x is at your own risk.
+
+## Threat model
+
+Argus is built for one user, one machine. It assumes:
+
+- **Trusted local environment.** Anyone with shell access to your
+  account can already read `~/.claude/`, so Argus reading the same
+  files isn't an additional privilege.
+- **Untrusted JSONL contents.** Session logs are produced by Claude
+  Code, but their contents (model names, project paths, transcript
+  text, tool inputs) are user-controlled. Argus treats them as
+  untrusted input — they're parsed with `zod` schemas, escaped before
+  rendering in the dashboard, and never executed.
+- **Untrusted browsers visiting localhost.** Other webpages the user
+  loads while Argus is running are not trusted. They cannot read
+  Argus data (Same-Origin Policy on responses) and cannot trigger
+  state changes (CSRF Origin check on POST).
+
+## Defaults that matter
+
+- **`127.0.0.1`-only by default.** The server doesn't listen on `0.0.0.0`
+  unless you pass `--host 0.0.0.0`, which prints a loud warning. Anyone
+  on your LAN can read every prompt you've ever sent if you flip this.
+- **Transcript indexing is opt-in.** The full-text search index over
+  Claude's responses, your replies, and tool output is off until you
+  enable it via Settings or `argus search enable`. Cost/token analytics
+  work without it.
+- **No external network calls.** The only outbound HTTP request in the
+  entire codebase is `argus pricing refresh`, a manual command that
+  fetches one JSON file from LiteLLM's GitHub. There is no telemetry,
+  no analytics, no embedding API, no LLM call.
+
+## Out of scope
+
+The following are **not** security issues for the purpose of this policy:
+
+- An attacker with shell access to the user's account reads
+  `~/.argus/argus.db`. (They can read `~/.claude/` directly anyway.)
+- A user runs `argus start --host 0.0.0.0` and someone on their LAN
+  reads the dashboard. The warning message at startup is intentional.
+- Cost figures don't match `ccusage` exactly. Argus is a different
+  bucketing strategy; not a security issue.
+- npm `audit --omit=dev` flags a transitive devDependency vulnerability.
+  devDependencies don't ship to package consumers.
+
+## What's already hardened
+
+Things this codebase deliberately does to reduce attack surface:
+
+- All SQL queries use parameterized statements (no string-concatenated
+  user input into SQL).
+- All user-controlled strings rendered in the dashboard go through
+  `escapeHtml()` before reaching `innerHTML`. The only HTML allowed
+  through is `<mark>...</mark>` from FTS5 `snippet()`, applied via a
+  separate `safeSnippet()` helper that escapes everything else.
+- `chokidar` runs with `followSymlinks: false`. `discoverSessionFiles`
+  additionally `realpath`-resolves each candidate and rejects anything
+  outside the canonical `~/.claude/` tree.
+- Per-tick read cap of 64 MiB on session JSONL and `history.jsonl`,
+  so a runaway or hostile multi-GB file can't OOM the process.
+- CSRF Origin check on all non-GET API routes.
+- No `postinstall` / `preinstall` scripts in `package.json`.
+- `package.json:files` whitelist — only `dist/`, `pricing/`,
+  `dashboard-dist/`, `README.md`, `LICENSE`, `SECURITY.md` ship. No
+  source, no tests, no docs, no config.
+
+If you spot a regression on any of the above, that's a real bug and
+worth reporting.
