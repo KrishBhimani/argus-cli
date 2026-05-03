@@ -119,5 +119,10 @@ export const api = {
   }>),
   searchIndexEnable: () => fetch('/api/search-index/enable', { method: 'POST' }).then(r => r.json()),
   searchIndexDisable: () => fetch('/api/search-index/disable', { method: 'POST' }).then(r => r.json()),
-  searchIndexClear: () => fetch('/api/search-index/clear', { method: 'POST' }).then(r => r.json()),
+  searchIndexClear: () => fetch('/api/search-index/clear', { method: 'POST' }).then(r => r.json() as Promise<{
+    enabled: boolean;
+    cleared: boolean;
+    freed_bytes: number;
+    db_size_bytes: number;
+  }>),
 };

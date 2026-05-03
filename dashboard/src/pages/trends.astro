@@ -19,7 +19,7 @@ import Default from '../layouts/Default.astro';
 
   <script>
     import { api } from '../scripts/api';
-    import { usd, num } from '../scripts/format';
+    import { usd, num, escapeHtml } from '../scripts/format';
     import { trendsLine } from '../scripts/charts';
 
     const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -36,11 +36,11 @@ import Default from '../layouts/Default.astro';
       const allKeys = [...new Set(points.flatMap(p => Object.keys(p.groups)))];
       $('#breakdown').innerHTML = points.length ? `
         <table>
-          <thead><tr><th>${g.charAt(0).toUpperCase() + g.slice(1)}</th>${allKeys.map(k => `<th class="num">${k} tokens</th>`).join('')}<th class="num">Total tokens</th><th class="num">Total <span class="est">(est. cost)</span></th></tr></thead>
+          <thead><tr><th>${g.charAt(0).toUpperCase() + g.slice(1)}</th>${allKeys.map(k => `<th class="num">${escapeHtml(k)} tokens</th>`).join('')}<th class="num">Total tokens</th><th class="num">Total <span class="est">(est. cost)</span></th></tr></thead>
           <tbody>${points.map(p => {
             const totalCost = allKeys.reduce((a, k) => a + (p.groups[k]?.cost ?? 0), 0);
             const totalTokens = allKeys.reduce((a, k) => a + (p.groups[k]?.tokens ?? 0), 0);
-            return `<tr><td>${p.bucket}</td>${allKeys.map(k => {
+            return `<tr><td>${escapeHtml(p.bucket)}</td>${allKeys.map(k => {
               const tokens = p.groups[k]?.tokens ?? 0;
               return `<td class="num tok">${tokens > 0 ? num(tokens) : '—'}</td>`;
             }).join('')}<td class="num tok"><strong>${num(totalTokens)}</strong></td><td class="num cost">~${usd(totalCost)}</td></tr>`;

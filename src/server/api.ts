@@ -56,8 +56,41 @@ function mcpServerName(toolName: string): string | null {
   return rest.slice(0, sep);
 }
 
+// Origin allowlist for state-changing requests. Argus has no auth (it's a
+// local-first single-user tool), so the only line of defense against CSRF
+// is rejecting cross-origin POSTs. Without this, any webpage the user
+// visits while argus is running could fire-and-forget a POST to
+// /api/search-index/clear and silently wipe their data.
+//
+// Permits same-origin (no Origin header on a same-origin GET-derived
+// fetch is fine for read-only verbs, but POSTs from real browsers
+// always carry Origin in modern environments) and any localhost / 127
+// origin (so a dev opening a second port still works). Rejects null,
+// arbitrary http(s)://example.com, and missing-on-non-GET.
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  return origin.startsWith('http://localhost:')
+      || origin.startsWith('http://127.0.0.1:')
+      || origin.startsWith('http://[::1]:');
+}
+
 export function buildApi(repo: Repository, deps: ApiDeps) {
   const app = new Hono();
+
+  // CSRF guard for POST/PUT/DELETE/PATCH. GET stays unrestricted because
+  // it must work from the static dashboard (browsers omit Origin on
+  // same-origin GETs in some setups). The dashboard never issues
+  // cross-origin POSTs, so legitimate traffic is unaffected.
+  app.use('/api/*', async (c, next) => {
+    const method = c.req.method;
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+      return next();
+    }
+    if (!isAllowedOrigin(c.req.header('origin'))) {
+      return c.json({ error: 'cross-origin requests not allowed' }, 403);
+    }
+    return next();
+  });
 
   app.get('/api/sessions', (c) => {
     const limit = Number(c.req.query('limit') ?? 100);
@@ -181,6 +214,12 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     const project = c.req.query('project') || undefined;
     const includeSlash = c.req.query('include_slash') === '1';
 
+    // Same opt-out hard-gate as /api/search. Lower-level endpoint, but
+    // the same user-facing rule applies: flag off → nothing surfaces.
+    if (!repo.isSearchIndexingEnabled()) {
+      return c.json({ total: 0, prompts: [] });
+    }
+
     let result;
     try {
       result = repo.searchPrompts({ q, limit, project, includeSlash });
@@ -210,10 +249,12 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
   });
 
   app.get('/api/prompts/stats', (c) => {
+    if (!repo.isSearchIndexingEnabled()) return c.json({ total: 0, projects: 0, oldest_ms: null });
     return c.json(repo.promptStats());
   });
 
   app.get('/api/prompts/projects', (c) => {
+    if (!repo.isSearchIndexingEnabled()) return c.json({ projects: [] });
     return c.json({ projects: repo.promptProjects() });
   });
 
@@ -259,6 +300,19 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     const results: Result[] = [];
     let promptTotal = 0;
     let transcriptTotal = 0;
+
+    // Hard-gate the entire endpoint on the indexing flag. The data sits
+    // on disk (history.jsonl is always ingested; transcript_segments
+    // accumulates only when on) but search reveals none of it when the
+    // user has explicitly opted out — "off" should mean off everywhere,
+    // not "off for some sources".
+    if (!searchEnabled) {
+      return c.json({
+        total: 0, prompt_total: 0, transcript_total: 0,
+        search_indexing_enabled: false,
+        results: [],
+      });
+    }
 
     // Prompts side
     if (includePrompts) {
@@ -393,11 +447,22 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
 
   // Wipe + disable. Drops every transcript_segments row (and through
   // the FTS5 sync trigger, every FTS row) and turns the flag off.
+  // Then runs VACUUM so the freed pages actually shrink the file on
+  // disk — without it, SQLite would keep the freed pages around for
+  // future reuse and the user would see no change in file size.
   // Idempotent; safe to call repeatedly.
   app.post('/api/search-index/clear', (c) => {
+    const beforeBytes = repo.dbSizeBytes();
     repo.clearAllSegments();
     repo.setSearchIndexingEnabled(false);
-    return c.json({ enabled: false, cleared: true });
+    repo.vacuum();
+    const afterBytes = repo.dbSizeBytes();
+    return c.json({
+      enabled: false,
+      cleared: true,
+      freed_bytes: Math.max(0, beforeBytes - afterBytes),
+      db_size_bytes: afterBytes,
+    });
   });
 
   app.get('/api/ingest/status', (c) => c.json(deps.ingestStatus()));

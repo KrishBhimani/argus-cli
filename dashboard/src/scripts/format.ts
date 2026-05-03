@@ -50,3 +50,21 @@ export const shortPath = (p: string, n = 40) => {
 
 // Kept for backward compat with any pages still importing it; only Claude Code is supported now.
 export const agentTag = (_a: string) => `<span class="tag tag-claude">Claude</span>`;
+
+// Escape every HTML-special character so a string can be safely inserted
+// via innerHTML. ALWAYS use this for any value sourced from JSONL files
+// (model names, project paths, session ids, agent_version strings, tool
+// names, group keys, bucket labels, pricing version) — those bytes are
+// outside our control and any one of them could carry a script tag.
+//
+// FTS5 snippet output is a different beast (it embeds <mark> tags by
+// design); use safeSnippet() for that, not this. Anything else: this.
+export function escapeHtml(s: unknown): string {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

@@ -54,7 +54,7 @@ import Default from '../layouts/Default.astro';
 
   <script>
     import { api, type Turn } from '../scripts/api';
-    import { usd, tok, num, dur } from '../scripts/format';
+    import { usd, tok, num, dur, escapeHtml } from '../scripts/format';
 
     const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const TZ_ABBREV = (() => {
@@ -75,9 +75,6 @@ import Default from '../layouts/Default.astro';
       return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     };
 
-    function escapeHtml(s: string): string {
-      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
     function safeSnippet(s: string): string {
       const open = '\x00MK_OPEN\x00';
       const close = '\x00MK_CLOSE\x00';
@@ -120,17 +117,17 @@ import Default from '../layouts/Default.astro';
             <h3>Session</h3>
             <table style="border:none;">
               <tbody>
-                <tr><td style="width:25%;color:var(--text-2);">Claude Code</td><td><code>${s.agent_version ?? '—'}</code></td></tr>
-                <tr><td style="color:var(--text-2);">Project</td><td class="mono">${s.project_path || '—'}</td></tr>
-                <tr><td style="color:var(--text-2);">Primary model</td><td><code>${s.primary_model}</code></td></tr>
-                <tr><td style="color:var(--text-2);">Started</td><td>${fmtLocalDateTime(s.started_at)} <span style="color:var(--text-2);font-size:0.8rem;">${TZ_ABBREV} (${TZ})</span></td></tr>
+                <tr><td style="width:25%;color:var(--text-2);">Claude Code</td><td><code>${escapeHtml(s.agent_version ?? '—')}</code></td></tr>
+                <tr><td style="color:var(--text-2);">Project</td><td class="mono">${escapeHtml(s.project_path || '—')}</td></tr>
+                <tr><td style="color:var(--text-2);">Primary model</td><td><code>${escapeHtml(s.primary_model)}</code></td></tr>
+                <tr><td style="color:var(--text-2);">Started</td><td>${fmtLocalDateTime(s.started_at)} <span style="color:var(--text-2);font-size:0.8rem;">${escapeHtml(TZ_ABBREV)} (${escapeHtml(TZ)})</span></td></tr>
                 <tr><td style="color:var(--text-2);">Ended</td><td>${s.ended_at ? fmtLocalDateTime(s.ended_at) : '<span style="color:var(--text-2);">— still active</span>'}</td></tr>
                 <tr><td style="color:var(--text-2);">Fresh input</td><td>${num(s.total_fresh_input_tokens)} tokens</td></tr>
                 <tr><td style="color:var(--text-2);">Output</td><td>${num(s.total_output_tokens)} tokens</td></tr>
                 <tr><td style="color:var(--text-2);">Cache writes</td><td>${num(s.total_cache_write_tokens)} tokens</td></tr>
                 <tr><td style="color:var(--text-2);">Cache reads</td><td>${num(s.total_cache_read_tokens)} tokens</td></tr>
-                <tr><td style="color:var(--text-2);">Pricing version</td><td><code>${s.pricing_table_version}</code></td></tr>
-                <tr><td style="color:var(--text-2);">Session id</td><td class="mono" style="word-break:break-all;">${s.id}</td></tr>
+                <tr><td style="color:var(--text-2);">Pricing version</td><td><code>${escapeHtml(s.pricing_table_version)}</code></td></tr>
+                <tr><td style="color:var(--text-2);">Session id</td><td class="mono" style="word-break:break-all;">${escapeHtml(s.id)}</td></tr>
               </tbody>
             </table>
           </div>
@@ -139,7 +136,7 @@ import Default from '../layouts/Default.astro';
           <div class="card" style="margin-bottom:1rem;">
             <h3>Sub-agents (${subAgents.length})</h3>
             <ul style="margin:0;padding-left:1.2rem;color:var(--text-1);font-size:0.88rem;">
-              ${subAgents.map(id => `<li><a href="/session?id=${encodeURIComponent(id)}" class="mono">${id}</a></li>`).join('')}
+              ${subAgents.map(id => `<li><a href="/session?id=${encodeURIComponent(id)}" class="mono">${escapeHtml(id)}</a></li>`).join('')}
             </ul>
           </div>` : ''}
 
@@ -174,7 +171,7 @@ import Default from '../layouts/Default.astro';
                   <tr>
                     <td class="num">${t.sequence}</td>
                     <td>${fmtLocalTime(t.timestamp)}</td>
-                    <td><code>${t.model}</code></td>
+                    <td><code>${escapeHtml(t.model)}</code></td>
                     <td class="num tok">${num(t.fresh_input_tokens)}</td>
                     <td class="num tok">${num(t.cache_read_tokens)}</td>
                     <td class="num tok">${num(t.cache_write_tokens)}</td>

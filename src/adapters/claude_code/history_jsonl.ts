@@ -10,6 +10,12 @@ import type { Prompt } from '../../schema/types.js';
 // shortcut. We truncate so FTS5 doesn't try to index a multi-megabyte row.
 const DISPLAY_CAP_BYTES = 8 * 1024;
 
+// Per-tick read cap. Same OOM concern as session JSONL: history.jsonl
+// could in theory grow unbounded (it never rotates by default). 64 MiB
+// per tick is plenty for a tail that grows a few KB at a time, and
+// avoids one giant Buffer.alloc on the rare megabyte-class re-ingest.
+const MAX_TICK_BYTES = 64 * 1024 * 1024;
+
 // One line of ~/.claude/history.jsonl. The file is global (not per-session)
 // and Claude Code appends to it on every prompt submission.
 const HistoryLineSchema = z.object({
@@ -56,8 +62,9 @@ export async function ingestHistoryFile(
       return { inserted: 0, skipped_empty: 0, parse_errors: 0, new_offset: fromOffset };
     }
 
-    const buf = Buffer.alloc(size - fromOffset);
-    await fh.read(buf, 0, buf.length, fromOffset);
+    const readLen = Math.min(size - fromOffset, MAX_TICK_BYTES);
+    const buf = Buffer.alloc(readLen);
+    await fh.read(buf, 0, readLen, fromOffset);
     const text = buf.toString('utf8');
 
     const lastNewline = text.lastIndexOf('\n');

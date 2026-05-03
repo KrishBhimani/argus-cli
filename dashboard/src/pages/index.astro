@@ -46,7 +46,7 @@ import Default from '../layouts/Default.astro';
 
   <script>
     import { api } from '../scripts/api';
-    import { usd, tok, num, shortDate, shortPath } from '../scripts/format';
+    import { usd, tok, num, shortDate, shortPath, escapeHtml } from '../scripts/format';
     import { lineCost, calendarHeatmap, modelMix } from '../scripts/charts';
 
     const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -94,8 +94,8 @@ import Default from '../layouts/Default.astro';
             ${recentTop.map((s: any) => `
               <tr data-id="${encodeURIComponent(s.id)}">
                 <td>${shortDate(s.started_at)}</td>
-                <td class="mono">${shortPath(s.project_path)}</td>
-                <td><code>${s.primary_model}</code></td>
+                <td class="mono">${escapeHtml(shortPath(s.project_path))}</td>
+                <td><code>${escapeHtml(s.primary_model)}</code></td>
                 <td class="num tok">${tok(s.total_fresh_input_tokens + s.total_output_tokens + s.total_cache_read_tokens + s.total_cache_write_tokens)}</td>
                 <td class="num cost">~${usd(s.total_cost_usd)}</td>
               </tr>

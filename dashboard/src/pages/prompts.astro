@@ -10,18 +10,24 @@ import Default from '../layouts/Default.astro';
   </p>
 
   <!--
-    Banner shown when transcript indexing is off. Hits /api/search-index/status
-    on load and inserts itself only when needed, so the page stays clean for
-    the common (enabled) case.
+    Banner shown when search indexing is off. Hits /api/search-index/status
+    on load and inserts itself only when needed, so the page stays clean
+    for the common (enabled) case. Includes an inline Enable button so
+    users don't have to bounce to Settings just to flip the flag back on.
   -->
   <div id="search-disabled-banner" style="display:none;
     background:var(--bg-1);border:1px solid var(--warn);border-left-width:4px;
     border-radius:6px;padding:0.85rem 1.05rem;margin-bottom:1rem;
-    color:var(--text-1);font-size:0.88rem;">
-    <strong style="color:var(--warn);">Transcript indexing is off.</strong>
-    Searching <em>only</em> your typed prompts.
-    <a href="/settings" style="color:var(--accent);">Enable in Settings</a> to also
-    search assistant responses, your replies, and tool output.
+    color:var(--text-1);font-size:0.88rem;
+    align-items:center;gap:0.8rem;flex-wrap:wrap;">
+    <div style="flex:1;min-width:240px;">
+      <strong style="color:var(--warn);">Search is off.</strong>
+      Argus isn't surfacing any of your prompt or transcript history right now.
+      Enable to index your sessions for full-text search — 100% local, no API calls.
+    </div>
+    <button id="banner-enable" style="border-color:var(--accent);color:var(--accent);flex-shrink:0;">
+      Enable search
+    </button>
   </div>
 
   <div class="card" style="margin-bottom:1rem;display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
@@ -174,7 +180,7 @@ import Default from '../layouts/Default.astro';
 
   <script>
     import { api } from '../scripts/api';
-    import { ago } from '../scripts/format';
+    import { ago, escapeHtml } from '../scripts/format';
 
     const $ = (s: string) => document.querySelector(s) as HTMLElement;
     const $$ = (s: string) => Array.from(document.querySelectorAll(s)) as HTMLElement[];
@@ -194,9 +200,6 @@ import Default from '../layouts/Default.astro';
       return (n / 1024 / 1024).toFixed(1) + ' MB';
     }
 
-    function escapeHtml(s: string): string {
-      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
     function safeSnippet(s: string): string {
       const open = '\x00MK_OPEN\x00';
       const close = '\x00MK_CLOSE\x00';
@@ -344,13 +347,29 @@ import Default from '../layouts/Default.astro';
     }
 
     // Show / hide the "indexing is off" banner based on the persisted
-    // flag. Done once on page load — we don't need to react to toggles
-    // happening in another tab; refreshing the page is enough.
+    // flag. Wires up the inline Enable button so the user can flip it
+    // back on without leaving the page.
     async function loadIndexBanner() {
       try {
         const s = await api.searchIndexStatus();
         const banner = document.getElementById('search-disabled-banner')!;
-        banner.style.display = s.enabled ? 'none' : '';
+        banner.style.display = s.enabled ? 'none' : 'flex';
+
+        const enableBtn = document.getElementById('banner-enable');
+        if (enableBtn && !s.enabled) {
+          enableBtn.onclick = async () => {
+            enableBtn.setAttribute('disabled', 'true');
+            enableBtn.textContent = 'Enabling…';
+            await api.searchIndexEnable();
+            // Hide the banner immediately; refresh search so the user
+            // sees results populate as the backfill progresses.
+            banner.style.display = 'none';
+            await refresh();
+            // Reload projects since prompt_projects was returning [] while off.
+            projSelect.querySelectorAll('option:not([value=""])').forEach(o => o.remove());
+            await loadProjects();
+          };
+        }
       } catch { /* ignore */ }
     }
 

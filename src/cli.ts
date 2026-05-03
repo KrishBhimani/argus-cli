@@ -21,8 +21,9 @@ program.name('argus').description('Local-first dashboard for coding-agent costs'
 
 program.command('start')
   .option('-p, --port <port>', 'port', '4242')
+  .option('--host <host>', 'bind host (default: 127.0.0.1; pass 0.0.0.0 to expose on LAN — see SECURITY note in README)', '127.0.0.1')
   .option('--data-dir <dir>', 'data dir', join(homedir(), '.argus'))
-  .action(async ({ port, dataDir }) => {
+  .action(async ({ port, host, dataDir }) => {
     const db = openDb(join(dataDir, 'argus.db'));
     const repo = new Repository(db);
     const claudeRoot = join(homedir(), '.claude');
@@ -43,10 +44,14 @@ program.command('start')
       ingestStatus: status,
       dashboardDir: dashDir,
       port: Number(port),
+      host,
       adapters,
       pricingTable: table,
     });
     console.log(`Argus running at ${url}`);
+    if (host === '0.0.0.0' || host === '::') {
+      console.warn('⚠ WARNING: bound to all network interfaces. Anyone on your LAN can read your prompt history, transcripts, and project paths.');
+    }
     try { await open(url); } catch { /* ignore */ }
   });
 
@@ -161,9 +166,16 @@ searchCmd.command('clear')
       process.stdin.pause();
       if (ans.toLowerCase() !== 'y') { console.log('Cancelled.'); process.exit(0); }
     }
+    const beforeBytes = repo.dbSizeBytes();
     repo.clearAllSegments();
     repo.setSearchIndexingEnabled(false);
+    repo.vacuum();
+    const afterBytes = repo.dbSizeBytes();
+    const freed = Math.max(0, beforeBytes - afterBytes);
+    const fmt = (n: number) => n >= 1024 * 1024 ? (n / 1024 / 1024).toFixed(1) + ' MB'
+      : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
     console.log(`Deleted ${segs.total.toLocaleString()} segments.`);
+    console.log(`Freed ${fmt(freed)} on disk (DB now ${fmt(afterBytes)}).`);
     process.exit(0);
   });
 

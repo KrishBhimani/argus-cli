@@ -142,8 +142,21 @@ import Default from '../layouts/Default.astro';
       const clear = document.getElementById('btn-clear');
       if (clear) clear.addEventListener('click', async () => {
         if (!confirm(`Delete all ${s.segment_count.toLocaleString()} indexed segments and disable indexing? This cannot be undone — re-enabling will require re-indexing from your sessions.`)) return;
-        await api.searchIndexClear();
+        const r = await api.searchIndexClear();
         await loadSearchStatus();
+        // Surface how much was actually reclaimed on disk so users see
+        // VACUUM ran and shrunk the file. Pure DELETE without VACUUM
+        // would leave the file size unchanged.
+        if (typeof r?.freed_bytes === 'number') {
+          const fmt = (n: number) => n >= 1024 * 1024 ? (n / 1024 / 1024).toFixed(1) + ' MB'
+            : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
+          $('#search-progress').style.display = '';
+          $('#search-progress').innerHTML =
+            `Cleared. Freed <strong style="color:var(--text-0);">${fmt(r.freed_bytes)}</strong> on disk.`;
+          // Auto-hide the toast after a few seconds so the row doesn't
+          // get stuck showing it forever.
+          setTimeout(() => { $('#search-progress').style.display = 'none'; }, 6000);
+        }
       });
     }
 

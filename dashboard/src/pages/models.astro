@@ -37,7 +37,7 @@ import Default from '../layouts/Default.astro';
 
   <script>
     import { api, type Session } from '../scripts/api';
-    import { usd, tok, num } from '../scripts/format';
+    import { usd, tok, num, escapeHtml } from '../scripts/format';
     import * as echarts from 'echarts/core';
     import { BarChart } from 'echarts/charts';
     import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
@@ -112,7 +112,7 @@ import Default from '../layouts/Default.astro';
 
       $('#t tbody').innerHTML = rows.map(([m, v]) => `
         <tr>
-          <td><code>${m}</code></td>
+          <td><code>${escapeHtml(m)}</code></td>
           <td class="num">${num(v.sessions)}</td>
           <td class="num">${tok(v.fresh)}</td>
           <td class="num">${tok(v.output)}</td>

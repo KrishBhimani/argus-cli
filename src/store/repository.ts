@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import type { Db } from './db.js';
 import type { Session, Turn, ToolCall, Prompt, TranscriptSegment } from '../schema/types.js';
 import type { ParseError } from '../adapters/adapter.js';
@@ -432,6 +433,57 @@ export class Repository {
   // row). Used by the "Clear" button in Settings and `argus search clear`.
   clearAllSegments(): void {
     this.db.exec(`DELETE FROM transcript_segments;`);
+  }
+
+  // Total on-disk footprint in bytes — sum of the three files SQLite
+  // maintains in WAL mode:
+  //   * <db>          : the persistent data (pages)
+  //   * <db>-wal      : pending writes not yet checkpointed into the main file
+  //   * <db>-shm      : shared-memory coordination (~32 KB, fixed)
+  //
+  // We sum file sizes via stat() rather than pragma_page_count because
+  // the user's mental model is "what does `ls -la` show". A pure
+  // page-count would understate the cost during heavy writes (when the
+  // WAL is balloon'd) and overstate the savings after a VACUUM (since
+  // VACUUM writes the rewrite to WAL first; the on-disk truth includes
+  // the WAL until it checkpoints).
+  //
+  // Falls back to the page-count formula for :memory: databases (used
+  // in tests), where the path-stat approach has nothing to stat.
+  dbSizeBytes(): number {
+    const path = this.db.name;
+    if (!path || path === ':memory:' || path === '') {
+      const row = this.db.prepare(
+        `SELECT (SELECT page_count FROM pragma_page_count()) *
+                (SELECT page_size  FROM pragma_page_size()) AS bytes`,
+      ).get() as any;
+      return row?.bytes ?? 0;
+    }
+    let total = 0;
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { total += statSync(path + suffix).size; }
+      catch { /* file may not exist on a fresh / quiescent DB; treat as 0 */ }
+    }
+    return total;
+  }
+
+  // Reclaim free pages by rewriting the DB. SQLite's DELETE marks pages
+  // as free but leaves them inside the file for reuse — the file only
+  // shrinks once VACUUM runs. We invoke this from the "clear indexed
+  // data" path so users see the freed bytes immediately on disk.
+  //
+  // WAL caveat: in WAL mode, VACUUM writes the rewrite into the
+  // -wal sidecar first; without a checkpoint, the user sees the main
+  // .db file shrink but the -wal file balloon, so total disk usage
+  // looks barely changed. The TRUNCATE checkpoint merges WAL into the
+  // main file and shrinks -wal back to zero, which is what users
+  // actually want to see when they click "clear".
+  vacuum(): void {
+    this.db.exec('VACUUM');
+    // Coerce a clean checkpoint. PASSIVE / FULL would leave a non-
+    // empty -wal; TRUNCATE forces it to size 0 so the file listing
+    // matches the user's expectation of "I freed space".
+    this.db.pragma('wal_checkpoint(TRUNCATE)');
   }
 
   // ─── App-meta-backed settings ──────────────────────────────────────────

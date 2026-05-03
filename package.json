@@ -1,7 +1,7 @@
 {
   "name": "argus-cli",
   "version": "0.1.0",
-  "description": "Local-first dashboard for coding-agent cost and token analytics across Claude Code and Codex CLI",
+  "description": "Local-first dashboard for Claude Code cost, token, tool-usage, and full-text search analytics",
   "type": "module",
   "bin": {
     "argus": "./dist/cli.js"

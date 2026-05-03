@@ -6,6 +6,14 @@ import { extractTurns } from './extract_turns.js';
 import { extractToolCalls } from './extract_tool_calls.js';
 import { extractTranscriptSegments } from './extract_transcript.js';
 
+// Per-tick read cap. A multi-GB JSONL (corrupt log, runaway append, or
+// a hostile file planted in ~/.claude/projects/) would otherwise make
+// Buffer.alloc() grab the entire unread tail in one shot and OOM the
+// process. The byte-offset tail design already supports partial reads —
+// we just clamp here, the watcher fires again, and we pick up from the
+// new offset on the next tick. Same effective throughput, no OOM.
+const MAX_TICK_BYTES = 64 * 1024 * 1024; // 64 MiB
+
 export async function ingestClaudeCodeFile(
   filePath: string,
   fromOffset = 0
@@ -17,8 +25,9 @@ export async function ingestClaudeCodeFile(
     if (size <= fromOffset) {
       return { result: emptyResult(filePath), new_offset: fromOffset };
     }
-    const buf = Buffer.alloc(size - fromOffset);
-    await fh.read(buf, 0, buf.length, fromOffset);
+    const readLen = Math.min(size - fromOffset, MAX_TICK_BYTES);
+    const buf = Buffer.alloc(readLen);
+    await fh.read(buf, 0, readLen, fromOffset);
     const text = buf.toString('utf8');
 
     const lastNewline = text.lastIndexOf('\n');

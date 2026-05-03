@@ -48,7 +48,7 @@ import Default from '../layouts/Default.astro';
 
   <script>
     import { api } from '../scripts/api';
-    import { num } from '../scripts/format';
+    import { num, escapeHtml } from '../scripts/format';
     import * as echarts from 'echarts/core';
     import { BarChart } from 'echarts/charts';
     import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
@@ -96,10 +96,21 @@ import Default from '../layouts/Default.astro';
       return c;
     }
 
-    function kpiCard(label: string, value: string, sub?: string) {
+    // KPI tile renderer. The default `.kpi-value` style in global.css
+    // assumes a short scalar (numbers, percentages); when we need to
+    // show a tool/server name that can be arbitrary length, we override
+    // the font down a notch and add ellipsis so it never overflows the
+    // card. The full name shows on hover via the title attribute.
+    function kpiCard(label: string, value: string, sub?: string, kind: 'scalar' | 'name' = 'scalar') {
+      const valueStyle = kind === 'name'
+        ? 'font-size:1.05rem;font-family:\'SF Mono\',Consolas,monospace;font-weight:500;'
+          + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+          + 'max-width:100%;display:block;color:var(--text-0);'
+        : '';
+      const valueAttr = kind === 'name' ? `title="${value.replace(/"/g, '&quot;')}"` : '';
       return `<div class="card"><div class="kpi">
         <div class="kpi-label">${label}</div>
-        <div class="kpi-value">${value}</div>
+        <div class="kpi-value" style="${valueStyle}" ${valueAttr}>${value}</div>
         ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
       </div></div>`;
     }
@@ -113,11 +124,13 @@ import Default from '../layouts/Default.astro';
       const topTool = data.tool_leaderboard[0]?.name ?? '—';
       const topMcp = data.mcp_servers[0]?.server ?? '—';
 
+      // Names (topTool/topMcp) come from JSONL data — escape them before
+      // they hit innerHTML. Numeric/static fields are inherently safe.
       $('#kpis').innerHTML = [
         kpiCard('Tool calls', num(totalCalls), w.value === 'all' ? 'all time' : w.value),
         kpiCard('Error rate', errorRate, totalErrors > 0 ? `${num(totalErrors)} errors` : 'no errors'),
-        kpiCard('Top tool', `<code>${topTool}</code>`, data.tool_leaderboard[0] ? `${num(data.tool_leaderboard[0].calls)} calls` : ''),
-        kpiCard('Top MCP', topMcp === '—' ? '—' : `<code>${topMcp}</code>`, data.mcp_servers[0] ? `${num(data.mcp_servers[0].calls)} calls` : 'no MCP usage'),
+        kpiCard('Top tool', escapeHtml(topTool), data.tool_leaderboard[0] ? `${num(data.tool_leaderboard[0].calls)} calls` : '', 'name'),
+        kpiCard('Top MCP', escapeHtml(topMcp), data.mcp_servers[0] ? `${num(data.mcp_servers[0].calls)} calls` : 'no MCP usage', 'name'),
       ].join('');
 
       // Leaderboard
@@ -135,16 +148,31 @@ import Default from '../layouts/Default.astro';
         );
       }
 
-      // MCP / subagents — hide the panel entirely if empty so we don't show a hollow widget
+      // MCP / subagents — hide the panel entirely if empty so we don't
+      // show a hollow widget. Order matters here: ECharts reads the
+      // container size at init time, so EVERY ancestor of the chart
+      // container must already be visible before bar() runs. Otherwise
+      // a hidden parent gives a 0×0 layout, the canvas inits with that
+      // size, and never recovers (we saw this when toggling from a
+      // window where MCP=0 to "all time" — the panel headed showed up
+      // but the canvas was zero-height).
+      //
+      // Sequence: dispose old charts → set ALL display states (parent
+      // row + child cards) → THEN init new charts.
       const splits = $('#splits');
       const mcpCard = splits.children[0] as HTMLElement;
       const subCard = splits.children[1] as HTMLElement;
+      const showMcp = data.mcp_servers.length > 0;
+      const showSub = data.subagents.length > 0;
 
       mcpChart?.dispose();
-      if (data.mcp_servers.length === 0) {
-        mcpCard.style.display = 'none';
-      } else {
-        mcpCard.style.display = '';
+      subChart?.dispose();
+
+      splits.style.display = (showMcp || showSub) ? '' : 'none';
+      mcpCard.style.display = showMcp ? '' : 'none';
+      subCard.style.display = showSub ? '' : 'none';
+
+      if (showMcp) {
         mcpChart = bar(
           $('#mcp'),
           data.mcp_servers.map(m => m.server),
@@ -153,12 +181,7 @@ import Default from '../layouts/Default.astro';
           data.mcp_servers.map(m => m.errors),
         );
       }
-
-      subChart?.dispose();
-      if (data.subagents.length === 0) {
-        subCard.style.display = 'none';
-      } else {
-        subCard.style.display = '';
+      if (showSub) {
         subChart = bar(
           $('#subagents'),
           data.subagents.map(s => s.type),
@@ -168,16 +191,13 @@ import Default from '../layouts/Default.astro';
         );
       }
 
-      // Hide entire splits row if both are empty
-      splits.style.display = data.mcp_servers.length === 0 && data.subagents.length === 0 ? 'none' : '';
-
       // Detail table
       const tbody = $('#tools-table tbody');
       tbody.innerHTML = data.tool_leaderboard.length === 0
         ? '<tr><td colspan="4" class="empty">—</td></tr>'
         : data.tool_leaderboard.map(t => `
           <tr>
-            <td><code>${t.name}</code></td>
+            <td><code>${escapeHtml(t.name)}</code></td>
             <td class="num">${num(t.calls)}</td>
             <td class="num">${num(t.errors)}</td>
             <td class="num">${(t.error_rate * 100).toFixed(1)}%</td>

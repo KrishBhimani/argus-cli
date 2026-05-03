@@ -29,7 +29,7 @@ import Default from '../../layouts/Default.astro';
 
   <script>
     import { api, type Session } from '../../scripts/api';
-    import { usd, tok, num, shortDate, shortPath, dur } from '../../scripts/format';
+    import { usd, tok, num, shortDate, shortPath, dur, escapeHtml } from '../../scripts/format';
 
     let all: Session[] = [];
     let sortKey = 'started_at';
@@ -57,8 +57,8 @@ import Default from '../../layouts/Default.astro';
       tbody.innerHTML = rows.map(s => `
         <tr data-id="${encodeURIComponent(s.id)}">
           <td>${shortDate(s.started_at)}</td>
-          <td class="mono">${shortPath(s.project_path, 50)}</td>
-          <td><code>${s.primary_model}</code></td>
+          <td class="mono">${escapeHtml(shortPath(s.project_path, 50))}</td>
+          <td><code>${escapeHtml(s.primary_model)}</code></td>
           <td class="num">${dur(s.duration_sec)}</td>
           <td class="num">${num(s.turn_count)}</td>
           <td class="num tok">${tok(tokens(s))}</td>

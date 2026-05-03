@@ -16,6 +16,11 @@ export async function startWatcher(adapters: Adapter[], repo: Repository, table:
     const w = chokidar.watch(root, {
       persistent: true,
       ignoreInitial: false,
+      // Don't follow symlinks. A hostile or accidental link planted in
+      // ~/.claude/projects/ pointing to /etc/passwd or ~/.ssh/* would
+      // otherwise be parsed and have its first 200 bytes per line stored
+      // as parse_errors (then served via /api/parse-errors).
+      followSymlinks: false,
       awaitWriteFinish: { stabilityThreshold: opts.stabilityThresholdMs ?? 100, pollInterval: 30 },
     });
     const handle = async (p: string) => {
@@ -39,6 +44,7 @@ export async function startWatcher(adapters: Adapter[], repo: Repository, table:
         const hw = chokidar.watch(historyPath, {
           persistent: true,
           ignoreInitial: false,
+          followSymlinks: false,
           awaitWriteFinish: { stabilityThreshold: opts.stabilityThresholdMs ?? 100, pollInterval: 30 },
         });
         const histHandle = async () => {

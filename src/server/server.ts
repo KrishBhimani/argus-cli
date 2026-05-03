@@ -12,6 +12,13 @@ export interface ServerOpts {
   ingestStatus: () => IngestStatus;
   dashboardDir: string;
   port: number;
+  // Network bind. Defaults to 127.0.0.1 — Argus is a local-first tool
+  // that exposes prompt history, transcripts, and project paths. Any
+  // other interface (especially 0.0.0.0) means anyone on the LAN can
+  // read every conversation you've ever had with Claude. Keep the
+  // default tight; force the user to opt in via `argus start --host
+  // 0.0.0.0` if they really want LAN exposure.
+  host?: string;
   // Slice 3 (opt-in indexing): the API needs access to the adapter list
   // and pricing table so the search-index/enable handler can fire an
   // on-demand backfill. Both stay process-local — handlers don't ship
@@ -31,9 +38,14 @@ export async function startServer(repo: Repository, opts: ServerOpts): Promise<{
   root.route('/', api);
   root.use('/*', serveStatic({ root: opts.dashboardDir }));
 
+  const hostname = opts.host ?? '127.0.0.1';
+
   return new Promise((resolve, reject) => {
-    const server = serve({ fetch: root.fetch, port: opts.port }, (info) => {
-      const url = `http://localhost:${info.port}`;
+    const server = serve({ fetch: root.fetch, port: opts.port, hostname }, (info) => {
+      // Build the URL with the actual bind host so a 0.0.0.0 opt-in
+      // surfaces honestly instead of pretending to be localhost.
+      const displayHost = hostname === '0.0.0.0' || hostname === '::' ? 'localhost' : hostname;
+      const url = `http://${displayHost}:${info.port}`;
       resolve({ url, stop: () => new Promise<void>(r => server.close(() => r())) });
     });
     server.on('error', (e: NodeJS.ErrnoException) => {
