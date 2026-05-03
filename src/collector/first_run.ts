@@ -73,25 +73,32 @@ export function runFirstPassIngest(adapters: Adapter[], repo: Repository, table:
       processed++;
     }
 
-    // Slice 1: backfill tool_calls for sessions ingested before this slice
-    // shipped (or before tool_calls was added to a given session's data).
-    // We re-ingest those files from offset 0 — the upsert pattern means
-    // turns and offsets stay consistent, but tool_calls populate where
-    // they were missing. Cap at 200 sessions per startup so a huge
-    // backlog doesn't dominate the background phase.
-    await backfillToolCalls(adapters, repo, table);
+    // Slice 1+2: backfill tool_calls and transcript segments for sessions
+    // ingested before those slices shipped (or before either was added to
+    // a given session's data). We re-ingest those files from offset 0 —
+    // the upsert pattern means turns and offsets stay consistent, but
+    // tool_calls and segments populate where they were missing. Cap at
+    // 200 sessions per startup so a huge backlog doesn't dominate the
+    // background phase. The two backfills share a single re-ingest so we
+    // never re-walk the same file twice.
+    await backfillMissingDerivedData(adapters, repo, table);
   })();
 
   return { foregroundDone, backfillDone, status: (): IngestStatus => ({ foregroundComplete, pending: total - processed, processed, total }) };
 }
 
-// Re-ingest sessions that don't yet have any tool_calls rows. We reset
-// their byte offset to 0 and let the normal pipeline re-walk; existing
-// turns upsert in place (no double-count) and tool_calls populate as a
-// side effect. Top-level sessions only — sub-agent files are walked as
-// part of their parent's re-ingest.
-async function backfillToolCalls(adapters: Adapter[], repo: Repository, table: PricingTable): Promise<void> {
-  const candidates = repo.sessionsMissingToolCalls(200);
+// Re-ingest sessions that don't yet have any derived data (tool_calls
+// rows or transcript_segments rows). We reset their byte offset to 0
+// and let the normal pipeline re-walk; existing turns upsert in place
+// (no double-count) and tool_calls/segments populate as a side effect.
+// Top-level sessions only — sub-agent files are walked as part of their
+// parent's re-ingest. Cap at 200 candidates total so this never
+// dominates the background phase on a fresh upgrade.
+async function backfillMissingDerivedData(adapters: Adapter[], repo: Repository, table: PricingTable): Promise<void> {
+  const missingTools = repo.sessionsMissingToolCalls(200);
+  const missingSegs = repo.sessionsMissingSegments(200);
+  const ids = new Set<string>([...missingTools.map(c => c.id), ...missingSegs.map(c => c.id)]);
+  const candidates = [...ids].slice(0, 200).map(id => ({ id }));
   if (candidates.length === 0) return;
 
   // Map session id → likely file path. We can derive it from

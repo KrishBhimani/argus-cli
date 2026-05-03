@@ -209,6 +209,132 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     return c.json({ projects: repo.promptProjects() });
   });
 
+  // ─── Slice 2: unified search (prompts + transcripts) ───────────────────
+
+  // Searches both prompts (your typed input) and transcript_segments
+  // (assistant text, user content, tool_result content). Results are
+  // labeled by source/role so the UI can distinguish "you asked" from
+  // "Claude said" from "tool output". When q is empty we return prompts
+  // recents only (transcripts are huge — chronological browsing is
+  // session-scoped, not global).
+  app.get('/api/search', (c) => {
+    const q = (c.req.query('q') ?? '').trim();
+    const limit = Math.min(Number(c.req.query('limit') ?? 50), 200);
+    const project = c.req.query('project') || undefined;
+    const includeSlash = c.req.query('include_slash') === '1';
+    // role filter is comma-separated. omitted = all roles + prompts.
+    const rolesParam = c.req.query('roles');
+    const wantedRoles = rolesParam ? rolesParam.split(',').filter(Boolean) : null;
+    const includePrompts = !wantedRoles || wantedRoles.includes('prompt');
+    const transcriptRoles = wantedRoles
+      ? wantedRoles.filter(r => r !== 'prompt')
+      : ['user', 'assistant', 'thinking', 'tool_result'];
+
+    type Result = {
+      kind: 'prompt' | 'transcript';
+      role: string;          // 'prompt' | 'user' | 'assistant' | 'thinking' | 'tool_result'
+      timestamp_ms: number;
+      project_path: string | null;
+      text: string;
+      snippet: string;
+      pasted_chars: number;
+      session_id: string | null;
+    };
+    const results: Result[] = [];
+    let promptTotal = 0;
+    let transcriptTotal = 0;
+
+    // Prompts side
+    if (includePrompts) {
+      let pr;
+      try {
+        pr = repo.searchPrompts({ q, limit, project, includeSlash });
+      } catch {
+        const escaped = q.replace(/"/g, '""');
+        try { pr = repo.searchPrompts({ q: `"${escaped}"`, limit, project, includeSlash }); }
+        catch { pr = { total: 0, rows: [] as any[] }; }
+      }
+      promptTotal = pr.total;
+      for (const r of pr.rows) {
+        results.push({
+          kind: 'prompt', role: 'prompt',
+          timestamp_ms: r.timestamp_ms,
+          project_path: r.project_path,
+          text: r.display,
+          snippet: r.snippet ?? r.display,
+          pasted_chars: r.pasted_chars,
+          session_id: repo.linkPromptToSession(r.project_path, r.timestamp_ms),
+        });
+      }
+    }
+
+    // Transcripts side. Only meaningful when q is non-empty (chronological
+    // browse over millions of segments isn't a useful product).
+    if (q && transcriptRoles.length) {
+      let tr;
+      try {
+        tr = repo.searchTranscripts({ q, limit, project, roles: transcriptRoles });
+      } catch {
+        const escaped = q.replace(/"/g, '""');
+        try { tr = repo.searchTranscripts({ q: `"${escaped}"`, limit, project, roles: transcriptRoles }); }
+        catch { tr = { total: 0, rows: [] as any[] }; }
+      }
+      transcriptTotal = tr.total;
+      for (const r of tr.rows) {
+        const ts = Date.parse(r.timestamp);
+        results.push({
+          kind: 'transcript', role: r.role,
+          timestamp_ms: Number.isFinite(ts) ? ts : 0,
+          project_path: r.project_path,
+          text: r.text,
+          snippet: r.snippet,
+          pasted_chars: 0,
+          session_id: r.session_id,
+        });
+      }
+    }
+
+    // Merge: keep most-recent first when there's no query (browse mode);
+    // otherwise interleave by score-bucket — but since FTS5 returns
+    // bm25-ranked rows already we just keep prompt hits first and trust
+    // the per-source ordering. Simple concat is fine for a v1; better
+    // ranking can come later.
+    if (!q) results.sort((a, b) => b.timestamp_ms - a.timestamp_ms);
+
+    return c.json({
+      total: promptTotal + transcriptTotal,
+      prompt_total: promptTotal,
+      transcript_total: transcriptTotal,
+      results: results.slice(0, limit),
+    });
+  });
+
+  // Per-session transcript search. The session detail page calls this with
+  // its own session id; q is required (without it the page just shows the
+  // turn list as before).
+  app.get('/api/sessions/:id/transcript', (c) => {
+    const id = c.req.param('id');
+    const q = (c.req.query('q') ?? '').trim();
+    const limit = Math.min(Number(c.req.query('limit') ?? 100), 500);
+    if (!q) return c.json({ total: 0, segments: [] });
+    let r;
+    try {
+      r = repo.searchTranscripts({ q, limit, sessionId: id });
+    } catch {
+      const escaped = q.replace(/"/g, '""');
+      try { r = repo.searchTranscripts({ q: `"${escaped}"`, limit, sessionId: id }); }
+      catch { r = { total: 0, rows: [] as any[] }; }
+    }
+    const segments = r.rows.map((row: any) => ({
+      uid: row.uid,
+      timestamp: row.timestamp,
+      role: row.role,
+      text: row.text,
+      snippet: row.snippet,
+    }));
+    return c.json({ total: r.total, segments });
+  });
+
   app.get('/api/ingest/status', (c) => c.json(deps.ingestStatus()));
   app.get('/api/pricing', (c) => c.json({ version: deps.pricingTableVersion }));
 

@@ -1,5 +1,6 @@
 import type { RawSessionHeader, RawTurnEvent } from '../schema/types.js';
 import type { RawToolCall } from './claude_code/extract_tool_calls.js';
+import type { RawSegment } from './claude_code/extract_transcript.js';
 
 export interface AdapterIngestResult {
   header: RawSessionHeader;
@@ -9,6 +10,8 @@ export interface AdapterIngestResult {
   // — the pipeline treats an empty array as "no tool data", not "delete
   // existing tool_calls", so adapters can opt in incrementally.
   tool_calls?: RawToolCall[];
+  // Slice 2 (full-transcript search). Same opt-in rule.
+  segments?: RawSegment[];
 }
 
 export interface ParseError {

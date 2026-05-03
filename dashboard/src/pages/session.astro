@@ -7,6 +7,45 @@ import Default from '../layouts/Default.astro';
     <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
   </div>
 
+  <style>
+    .seg-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.55rem;
+    }
+    .seg-meta {
+      font-size: 0.74rem;
+      color: var(--text-2);
+      margin-bottom: 0.3rem;
+    }
+    .seg-snippet {
+      font-size: 0.88rem;
+      color: var(--text-0);
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+    .seg-snippet mark {
+      background: rgba(240, 136, 62, 0.28);
+      color: var(--text-0);
+      padding: 0 1px;
+      border-radius: 2px;
+    }
+    .role-pill {
+      display: inline-block;
+      padding: 0.05em 0.55em;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 500;
+    }
+    .role-pill.role-user        { background: rgba(126,231,135,0.16); color: var(--good); }
+    .role-pill.role-assistant   { background: rgba(88,166,255,0.16); color: var(--codex); }
+    .role-pill.role-thinking    { background: rgba(188,140,255,0.16); color: #bc8cff; }
+    .role-pill.role-tool_result { background: var(--bg-2); color: var(--text-2); }
+  </style>
+
   <script>
     import { api, type Turn } from '../scripts/api';
     import { usd, tok, num, dur } from '../scripts/format';
@@ -30,7 +69,28 @@ import Default from '../layouts/Default.astro';
       return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     };
 
-    const id = new URLSearchParams(location.search).get('id');
+    function escapeHtml(s: string): string {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function safeSnippet(s: string): string {
+      const open = '\x00MK_OPEN\x00';
+      const close = '\x00MK_CLOSE\x00';
+      const stripped = s.replace(/<mark>/g, open).replace(/<\/mark>/g, close);
+      return escapeHtml(stripped).replace(new RegExp(open, 'g'), '<mark>').replace(new RegExp(close, 'g'), '</mark>');
+    }
+    function roleLabel(role: string): string {
+      switch (role) {
+        case 'user':        return 'you said';
+        case 'assistant':   return 'claude said';
+        case 'thinking':    return 'claude thinking';
+        case 'tool_result': return 'tool output';
+        default:            return role;
+      }
+    }
+
+    const params = new URLSearchParams(location.search);
+    const id = params.get('id');
+    const initialQ = params.get('q') ?? '';
     const root = document.getElementById('content')!;
     if (!id) { root.innerHTML = '<p class="empty">No session id.</p>'; }
     else {
@@ -77,6 +137,18 @@ import Default from '../layouts/Default.astro';
             </ul>
           </div>` : ''}
 
+          <div class="card" style="margin-bottom:1rem;">
+            <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
+              <h3 style="margin:0;flex-shrink:0;">Search this session</h3>
+              <input id="seg-q" type="text" placeholder="Find text in this session…"
+                style="flex:1;min-width:200px;background:var(--bg-2);color:var(--text-0);
+                       border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.7rem;
+                       font-size:0.9rem;font-family:inherit;outline:none;" />
+              <span id="seg-count" style="color:var(--text-2);font-size:0.8rem;"></span>
+            </div>
+            <div id="seg-results" style="margin-top:0.8rem;"></div>
+          </div>
+
           <div class="card">
             <div style="display:flex;justify-content:space-between;align-items:baseline;">
               <h3 style="margin:0;">Turns timeline</h3>
@@ -108,6 +180,54 @@ import Default from '../layouts/Default.astro';
             </table>` : '<p class="empty">No turns recorded for this session.</p>'}
           </div>
         `;
+
+        // Wire the per-session search box
+        const segQ = document.getElementById('seg-q') as HTMLInputElement;
+        const segResults = document.getElementById('seg-results')!;
+        const segCount = document.getElementById('seg-count')!;
+        let debTimer: any;
+
+        async function runSegSearch() {
+          const q = segQ.value.trim();
+          if (!q) {
+            segResults.innerHTML = '';
+            segCount.textContent = '';
+            return;
+          }
+          try {
+            const r = await api.sessionTranscriptSearch(id!, q, 200);
+            segCount.textContent = `${r.total} match${r.total === 1 ? '' : 'es'}`;
+            if (r.segments.length === 0) {
+              segResults.innerHTML = '<p class="empty" style="margin:0.5rem 0;">No matches in this session.</p>';
+              return;
+            }
+            // Sort chronologically so the user can read in conversation order
+            const sorted = r.segments.slice().sort((a, b) =>
+              Date.parse(a.timestamp) - Date.parse(b.timestamp));
+            segResults.innerHTML = sorted.map(s => `
+              <div class="seg-card">
+                <div class="seg-meta">
+                  <span class="role-pill role-${s.role}">${roleLabel(s.role)}</span>
+                  <span style="margin-left:0.5rem;">${fmtLocalTime(s.timestamp)}</span>
+                </div>
+                <div class="seg-snippet">${safeSnippet(s.snippet)}</div>
+              </div>
+            `).join('');
+          } catch {
+            segResults.innerHTML = '<p class="empty">Search failed.</p>';
+          }
+        }
+
+        segQ.addEventListener('input', () => {
+          clearTimeout(debTimer);
+          debTimer = setTimeout(runSegSearch, 150);
+        });
+
+        // Auto-run if a query came from the URL (?q=…)
+        if (initialQ) {
+          segQ.value = initialQ;
+          runSegSearch();
+        }
       });
     }
   </script>

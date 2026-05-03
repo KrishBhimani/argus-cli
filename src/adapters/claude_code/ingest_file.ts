@@ -4,6 +4,7 @@ import { AssistantLineSchema, UserLineSchema, type AssistantLine, type UserLine 
 import type { AdapterIngestResult, ParseError } from '../adapter.js';
 import { extractTurns } from './extract_turns.js';
 import { extractToolCalls } from './extract_tool_calls.js';
+import { extractTranscriptSegments } from './extract_transcript.js';
 
 export async function ingestClaudeCodeFile(
   filePath: string,
@@ -58,6 +59,7 @@ export async function ingestClaudeCodeFile(
 
     const turns = extractTurns(assistantLines);
     const tool_calls = extractToolCalls(assistantLines, userLines);
+    const segments = extractTranscriptSegments(assistantLines, userLines);
     const sessionId = basename(filePath, '.jsonl');
     const cwd = assistantLines[0]?.cwd ?? '';
     const version = assistantLines[assistantLines.length - 1]?.version ?? null;
@@ -78,6 +80,7 @@ export async function ingestClaudeCodeFile(
         },
         turns,
         tool_calls,
+        segments,
         parse_errors,
       },
       new_offset,
@@ -92,6 +95,7 @@ function emptyResult(file: string): AdapterIngestResult {
     header: { native_session_id: basename(file, '.jsonl'), agent: 'claude_code', agent_version: null, project_path: '', started_at: '', ended_at: null, agent_reported_cost_usd: null, metadata: {} },
     turns: [],
     tool_calls: [],
+    segments: [],
     parse_errors: [],
   };
 }

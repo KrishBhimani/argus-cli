@@ -96,28 +96,31 @@ next pick.
 
 ---
 
-### 🟡 4b — Transcript search (FTS5 over all JSONL bodies)
+### 🟢 4b — Transcript search (FTS5 over all JSONL bodies) — **shipped 2026-05-04**
 
-**What:** Extend FTS5 from just `history.jsonl` to the full body of every
-session JSONL — so you can find sessions by what *Claude said* or what code
-Claude wrote, not just what you typed.
+Indexes assistant text, thinking blocks, user text, and tool_result content
+into a `transcript_segments` table with an FTS5 sibling. The Prompts page is
+now a unified Search page that searches both prompts and transcripts;
+results are labeled by role ("you typed" / "you said" / "claude said" /
+"claude thinking" / "tool output").
 
-**Cost:** ~30–60 MB SQLite index, ~5–10s extra during initial backfill.
+Real-data confirmation: "ccusage" went from 0 hits (history.jsonl only) to
+41 hits across transcript bodies. Search latency stays sub-millisecond.
 
-**Why parked:** the Prompts page covers the highest-value use case ("find what
-I asked"). Transcript search adds "find what Claude said" — useful but lower
-frequency. Wait until we've used Prompts for a week to see if we miss it; then
-we'll know what fields matter (just text? include tool outputs? code blocks
-only?).
+Slice 2 spec: lived in conversation, not formally written. Implementation
+covered by MIGRATION_003 + extract_transcript.ts + repo helpers + new
+`/api/search` and `/api/sessions/:id/transcript` endpoints.
 
 ---
 
-### 🟡 4a — Per-session search (transcript Ctrl-F)
+### 🟢 4a — Per-session search — **shipped 2026-05-04**
 
-**What:** A search box on the existing session detail page that only searches
-the currently-open transcript. Cheap (no global index, just grep that one file).
-
-**Why parked:** small enhancement, low priority unless we hear it asked for.
+A search box on the session detail page hits
+`/api/sessions/:id/transcript?q=…` and shows ranked, role-labeled,
+chronologically-sorted matches inside that one session. Auto-runs when
+arriving from the global Search page with `?q=…` in the URL — so
+"find that thing" → click "Open session" → already filtered to where
+the term appears.
 
 ---
 

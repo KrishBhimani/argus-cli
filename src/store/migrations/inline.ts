@@ -128,3 +128,44 @@ CREATE TRIGGER IF NOT EXISTS prompts_au AFTER UPDATE ON prompts BEGIN
   INSERT INTO prompts_fts(rowid, display) VALUES (new.id, new.display);
 END;
 `;
+
+// MIGRATION_003 — Slice 2 (full-transcript search).
+//   * Adds transcript_segments table — one row per indexable text block in
+//     any assistant or user JSONL line. Roles: 'user', 'assistant',
+//     'thinking', 'tool_result'.
+//   * Adds transcript_fts virtual table for full-text search over the text
+//     column, and triggers to keep it in sync with the underlying table.
+//
+// Composite uid is "{session_id}:{line_uuid}:{block_index}" so repeated
+// tail re-ingests upsert in place rather than duplicating. The auto-
+// increment rowid is what FTS5 indexes; uid is just the dedup key.
+export const MIGRATION_003 = `
+CREATE TABLE IF NOT EXISTS transcript_segments (
+  rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid TEXT UNIQUE NOT NULL,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  timestamp TEXT NOT NULL,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_segments_session ON transcript_segments(session_id);
+CREATE INDEX IF NOT EXISTS idx_segments_ts ON transcript_segments(timestamp);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
+  text,
+  content='transcript_segments',
+  content_rowid='rowid',
+  tokenize='unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS segments_ai AFTER INSERT ON transcript_segments BEGIN
+  INSERT INTO transcript_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS segments_ad AFTER DELETE ON transcript_segments BEGIN
+  INSERT INTO transcript_fts(transcript_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS segments_au AFTER UPDATE ON transcript_segments BEGIN
+  INSERT INTO transcript_fts(transcript_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+  INSERT INTO transcript_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
+`;

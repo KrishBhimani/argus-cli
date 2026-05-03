@@ -89,3 +89,17 @@ export interface Prompt {
   pasted_chars: number;
   is_slash: 0 | 1;
 }
+
+// Slice 2 (full-transcript search) — one row per indexable text block in
+// any assistant or user JSONL line. The composite uid is
+// "{session_id}:{line_uuid}:{block_index}" so re-ingest of the same bytes
+// upserts in place. Roles are deliberately small for filterability.
+export type SegmentRole = 'user' | 'assistant' | 'thinking' | 'tool_result';
+
+export interface TranscriptSegment {
+  uid: string;
+  session_id: string;
+  timestamp: string;
+  role: SegmentRole;
+  text: string;
+}

@@ -1,89 +1,119 @@
 ---
 import Default from '../layouts/Default.astro';
 ---
-<Default title="Argus — Prompts">
-  <h2>Prompt history</h2>
+<Default title="Argus — Search">
+  <h2>Search</h2>
+  <p style="color:var(--text-2);font-size:0.85rem;margin:-0.4rem 0 1rem;">
+    Searches every prompt you've typed <em>and</em> every transcript Claude wrote
+    (assistant text, your replies, tool output). 100% local — SQLite FTS5, no
+    embeddings, no API calls.
+  </p>
+
   <div class="card" style="margin-bottom:1rem;display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
-    <input id="q" type="text" placeholder="Search every prompt you've typed…"
+    <input id="q" type="text" placeholder="Search…"
            style="flex:1;min-width:240px;background:var(--bg-2);color:var(--text-0);
                   border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.8rem;
                   font-size:0.95rem;font-family:inherit;outline:none;" />
     <select id="proj">
       <option value="">All projects</option>
     </select>
-    <label style="display:inline-flex;gap:0.4rem;align-items:center;font-size:0.8rem;color:var(--text-1);cursor:pointer;">
-      <input id="slash" type="checkbox" style="cursor:pointer;" />
-      Show slash commands
-    </label>
   </div>
 
-  <div id="stats-strip" class="card" style="margin-bottom:1rem;display:none;
-    color:var(--text-2);font-size:0.85rem;text-align:center;padding:0.7rem 1rem;"></div>
+  <div class="card" style="margin-bottom:1rem;display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;font-size:0.82rem;">
+    <span style="color:var(--text-2);">Show:</span>
+    <label class="role-toggle"><input type="checkbox" data-role="prompt"    checked /> Your prompts</label>
+    <label class="role-toggle"><input type="checkbox" data-role="user"      checked /> Your replies</label>
+    <label class="role-toggle"><input type="checkbox" data-role="assistant" checked /> Claude</label>
+    <label class="role-toggle"><input type="checkbox" data-role="thinking"          /> Thinking</label>
+    <label class="role-toggle"><input type="checkbox" data-role="tool_result"       /> Tool output</label>
+    <span style="margin-left:auto;color:var(--text-2);">
+      <label style="cursor:pointer;"><input id="slash" type="checkbox" /> Include slash commands</label>
+    </span>
+  </div>
+
+  <div id="totals" class="card" style="margin-bottom:1rem;display:none;
+    color:var(--text-2);font-size:0.82rem;text-align:center;padding:0.6rem 1rem;"></div>
 
   <div id="results"></div>
 
   <style>
-    .prompt-card {
+    .role-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      cursor: pointer;
+      color: var(--text-1);
+    }
+    .result-card {
       background: var(--bg-1);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 0.9rem 1.1rem;
-      margin-bottom: 0.7rem;
+      padding: 0.85rem 1.05rem;
+      margin-bottom: 0.65rem;
       transition: border-color 0.12s;
     }
-    .prompt-card:hover { border-color: var(--accent); }
-    .prompt-meta {
+    .result-card:hover { border-color: var(--accent); }
+    .result-meta {
       display: flex;
       justify-content: space-between;
+      align-items: center;
       gap: 1rem;
-      font-size: 0.78rem;
+      font-size: 0.76rem;
       color: var(--text-2);
-      margin-bottom: 0.4rem;
+      margin-bottom: 0.35rem;
     }
-    .prompt-meta .proj { font-family: 'SF Mono', Consolas, monospace; color: var(--text-1); }
-    .prompt-snippet {
-      font-size: 0.92rem;
+    .role-pill {
+      display: inline-block;
+      padding: 0.05em 0.55em;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      text-transform: lowercase;
+    }
+    .role-pill.role-prompt      { background: rgba(240,136,62,0.18); color: var(--accent); }
+    .role-pill.role-user        { background: rgba(126,231,135,0.16); color: var(--good); }
+    .role-pill.role-assistant   { background: rgba(88,166,255,0.16); color: var(--codex); }
+    .role-pill.role-thinking    { background: rgba(188,140,255,0.16); color: #bc8cff; }
+    .role-pill.role-tool_result { background: var(--bg-2); color: var(--text-2); }
+    .result-snippet {
+      font-size: 0.9rem;
       color: var(--text-0);
       white-space: pre-wrap;
       word-break: break-word;
-      line-height: 1.4;
+      line-height: 1.45;
     }
-    .prompt-snippet mark {
+    .result-snippet mark {
       background: rgba(240, 136, 62, 0.28);
       color: var(--text-0);
       padding: 0 1px;
       border-radius: 2px;
     }
-    .prompt-actions {
-      margin-top: 0.5rem;
-      font-size: 0.8rem;
-    }
-    .prompt-actions a { color: var(--accent); }
-    .prompt-actions .nolink { color: var(--text-2); font-style: italic; }
+    .result-actions { margin-top: 0.45rem; font-size: 0.78rem; }
+    .result-actions a { color: var(--accent); }
+    .result-actions .nolink { color: var(--text-2); font-style: italic; }
     .pasted-tag {
       display: inline-block;
       background: var(--bg-2);
       color: var(--text-2);
       padding: 0.05em 0.5em;
       border-radius: 4px;
-      font-size: 0.72rem;
+      font-size: 0.7rem;
       margin-left: 0.5rem;
     }
   </style>
 
   <script>
-    import { api, type PromptHit } from '../scripts/api';
+    import { api } from '../scripts/api';
     import { ago } from '../scripts/format';
 
     const $ = (s: string) => document.querySelector(s) as HTMLElement;
+    const $$ = (s: string) => Array.from(document.querySelectorAll(s)) as HTMLElement[];
     const qInput = $('#q') as HTMLInputElement;
     const projSelect = $('#proj') as HTMLSelectElement;
     const slashCheckbox = $('#slash') as HTMLInputElement;
 
-    // History.jsonl is a Windows path or POSIX path normalized to forward
-    // slashes. The basename (after the final /) is the friendly project
-    // name to display.
-    function projectBasename(p: string): string {
+    function projectBasename(p: string | null): string {
       if (!p) return '—';
       const parts = p.split('/');
       return parts[parts.length - 1] || p;
@@ -95,10 +125,6 @@ import Default from '../layouts/Default.astro';
       return (n / 1024 / 1024).toFixed(1) + ' MB';
     }
 
-    // Escape user-controlled text. The snippet from the server is already
-    // safe — FTS5 emits literal <mark>…</mark> around match terms, no other
-    // HTML — so we render it as-is. Plain display goes through textContent
-    // (set via innerText assignment) when there's no query.
     function escapeHtml(s: string): string {
       return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
@@ -107,48 +133,60 @@ import Default from '../layouts/Default.astro';
     // snippet. Defense-in-depth: if a future server change ever leaks raw
     // HTML through snippet(), the page won't render it.
     function safeSnippet(s: string): string {
-      // Replace <mark> and </mark> with sentinels, escape, then restore.
       const open = '\x00MK_OPEN\x00';
       const close = '\x00MK_CLOSE\x00';
       const stripped = s.replace(/<mark>/g, open).replace(/<\/mark>/g, close);
       return escapeHtml(stripped).replace(new RegExp(open, 'g'), '<mark>').replace(new RegExp(close, 'g'), '</mark>');
     }
 
-    function renderResults(prompts: PromptHit[]) {
-      if (prompts.length === 0) {
+    function roleLabel(role: string): string {
+      switch (role) {
+        case 'prompt':      return 'you typed';
+        case 'user':        return 'you said';
+        case 'assistant':   return 'claude said';
+        case 'thinking':    return 'claude thinking';
+        case 'tool_result': return 'tool output';
+        default:            return role;
+      }
+    }
+
+    function selectedRoles(): string[] {
+      return $$('.role-toggle input').filter(i => (i as HTMLInputElement).checked)
+        .map(i => (i as HTMLInputElement).dataset.role!);
+    }
+
+    function renderResults(d: { total: number; prompt_total: number; transcript_total: number; results: any[] }) {
+      const totals = $('#totals');
+      if (qInput.value.trim()) {
+        totals.style.display = '';
+        totals.innerHTML = `${d.total.toLocaleString()} matches: <span style="color:var(--accent);">${d.prompt_total.toLocaleString()}</span> in your prompts, <span style="color:var(--codex);">${d.transcript_total.toLocaleString()}</span> in transcripts`;
+      } else {
+        totals.style.display = 'none';
+      }
+
+      if (d.results.length === 0) {
         $('#results').innerHTML = qInput.value
-          ? '<div class="empty">No prompts match this search.</div>'
-          : '<div class="empty">No prompts indexed yet. Use Claude Code and they\'ll appear here.</div>';
+          ? '<div class="empty">No matches.</div>'
+          : '<div class="empty">Type something to search across every prompt and every transcript.</div>';
         return;
       }
-      $('#results').innerHTML = prompts.map(p => `
-        <div class="prompt-card">
-          <div class="prompt-meta">
-            <span>${ago(new Date(p.timestamp_ms).toISOString())} · <span class="proj">${escapeHtml(projectBasename(p.project_path))}</span></span>
-            <span>${p.pasted_chars > 0 ? `<span class="pasted-tag">+ ${bytesHuman(p.pasted_chars)} pasted</span>` : ''}</span>
+      $('#results').innerHTML = d.results.map(r => `
+        <div class="result-card">
+          <div class="result-meta">
+            <span>
+              <span class="role-pill role-${r.role}">${roleLabel(r.role)}</span>
+              <span style="margin-left:0.5rem;">${ago(new Date(r.timestamp_ms).toISOString())} · ${escapeHtml(projectBasename(r.project_path))}</span>
+            </span>
+            <span>${r.pasted_chars > 0 ? `<span class="pasted-tag">+ ${bytesHuman(r.pasted_chars)} pasted</span>` : ''}</span>
           </div>
-          <div class="prompt-snippet">${safeSnippet(p.snippet)}</div>
-          <div class="prompt-actions">
-            ${p.session_id
-              ? `<a href="/session?id=${encodeURIComponent(p.session_id)}">→ Open session</a>`
-              : `<span class="nolink">(no linked session)</span>`}
+          <div class="result-snippet">${safeSnippet(r.snippet)}</div>
+          <div class="result-actions">
+            ${r.session_id
+              ? `<a href="/session?id=${encodeURIComponent(r.session_id)}${qInput.value.trim() ? '&q=' + encodeURIComponent(qInput.value.trim()) : ''}">→ Open session</a>`
+              : '<span class="nolink">(no linked session)</span>'}
           </div>
         </div>
       `).join('');
-    }
-
-    async function loadStats() {
-      try {
-        const stats = await api.promptStats();
-        const strip = $('#stats-strip');
-        if (stats.total === 0) {
-          strip.style.display = 'none';
-        } else {
-          const oldest = stats.oldest_ms ? new Date(stats.oldest_ms).toLocaleDateString() : '—';
-          strip.style.display = '';
-          strip.textContent = `${stats.total.toLocaleString()} prompts · ${stats.projects} projects · oldest ${oldest}`;
-        }
-      } catch { /* ignore */ }
     }
 
     async function loadProjects() {
@@ -168,13 +206,14 @@ import Default from '../layouts/Default.astro';
       const q = qInput.value.trim();
       const project = projSelect.value || undefined;
       const includeSlash = slashCheckbox.checked;
+      const roles = selectedRoles();
 
-      // Hide stats strip whenever a query or project filter is active —
-      // they only make sense for the unfiltered view.
-      $('#stats-strip').style.display = (q || project) ? 'none' : '';
-
-      const { prompts } = await api.prompts({ q, limit: 50, project, includeSlash });
-      renderResults(prompts);
+      try {
+        const d = await api.search({ q, limit: 100, project, includeSlash, roles });
+        renderResults(d);
+      } catch {
+        $('#results').innerHTML = '<div class="empty">Search failed.</div>';
+      }
     }
 
     function refreshDebounced() {
@@ -185,8 +224,8 @@ import Default from '../layouts/Default.astro';
     qInput.addEventListener('input', refreshDebounced);
     projSelect.addEventListener('change', refresh);
     slashCheckbox.addEventListener('change', refresh);
+    $$('.role-toggle input').forEach(el => el.addEventListener('change', refresh));
 
-    loadStats();
     loadProjects();
     refresh();
   </script>

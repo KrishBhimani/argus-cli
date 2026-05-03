@@ -1,5 +1,5 @@
 import type { Db } from './db.js';
-import type { Session, Turn, ToolCall, Prompt } from '../schema/types.js';
+import type { Session, Turn, ToolCall, Prompt, TranscriptSegment } from '../schema/types.js';
 import type { ParseError } from '../adapters/adapter.js';
 
 // Same project_path normalization rule used by both the session ingest path
@@ -320,5 +320,101 @@ export class Repository {
       LIMIT 1
     `).get(projectPath, timestampMs, timestampMs, timestampMs) as any;
     return row?.id ?? null;
+  }
+
+  // ─── Transcript segments (Slice 2) ─────────────────────────────────────
+
+  upsertTranscriptSegments(rows: TranscriptSegment[]): void {
+    if (rows.length === 0) return;
+    const insert = this.db.prepare(`
+      INSERT INTO transcript_segments (uid, session_id, timestamp, role, text)
+      VALUES (@uid, @session_id, @timestamp, @role, @text)
+      ON CONFLICT(uid) DO UPDATE SET
+        session_id=excluded.session_id, timestamp=excluded.timestamp,
+        role=excluded.role, text=excluded.text
+    `);
+    const tx = this.db.transaction((rs: TranscriptSegment[]) => {
+      for (const r of rs) insert.run(r);
+    });
+    tx(rows);
+  }
+
+  countSegmentsForSession(sessionId: string): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM transcript_segments WHERE session_id = ?`).get(sessionId) as any;
+    return row?.n ?? 0;
+  }
+
+  sessionsMissingSegments(limit: number): Array<{ id: string }> {
+    return this.db.prepare(`
+      SELECT s.id FROM sessions s
+      LEFT JOIN (SELECT DISTINCT session_id FROM transcript_segments) t ON t.session_id = s.id
+      WHERE t.session_id IS NULL
+      ORDER BY s.started_at DESC
+      LIMIT ?
+    `).all(limit) as any[];
+  }
+
+  // Search the transcript_fts index. Same fall-back-on-syntax-error pattern
+  // is applied in the API layer, not here. project filter joins through to
+  // sessions (segments don't carry project directly).
+  searchTranscripts(opts: {
+    q: string;
+    limit: number;
+    project?: string;
+    sessionId?: string;
+    roles?: string[]; // e.g. ['user','assistant']
+  }): { total: number; rows: Array<{
+    uid: string; session_id: string; timestamp: string; role: string;
+    text: string; snippet: string; project_path: string | null;
+  }> } {
+    const conds: string[] = ['transcript_fts MATCH ?'];
+    const params: any[] = [opts.q];
+    if (opts.project) {
+      conds.push('s.project_path = ?');
+      params.push(opts.project);
+    }
+    if (opts.sessionId) {
+      conds.push('seg.session_id = ?');
+      params.push(opts.sessionId);
+    }
+    if (opts.roles && opts.roles.length) {
+      conds.push(`seg.role IN (${opts.roles.map(() => '?').join(',')})`);
+      params.push(...opts.roles);
+    }
+    const where = `WHERE ${conds.join(' AND ')}`;
+
+    const sql = `
+      SELECT seg.uid, seg.session_id, seg.timestamp, seg.role, seg.text,
+             snippet(transcript_fts, 0, '<mark>', '</mark>', '…', 16) AS snippet,
+             s.project_path AS project_path
+      FROM transcript_fts
+      JOIN transcript_segments seg ON seg.rowid = transcript_fts.rowid
+      LEFT JOIN sessions s ON s.id = seg.session_id
+      ${where}
+      ORDER BY bm25(transcript_fts)
+      LIMIT ?
+    `;
+    const countSql = `
+      SELECT COUNT(*) AS n FROM transcript_fts
+      JOIN transcript_segments seg ON seg.rowid = transcript_fts.rowid
+      LEFT JOIN sessions s ON s.id = seg.session_id
+      ${where}
+    `;
+    const rows = this.db.prepare(sql).all(...params, opts.limit) as any[];
+    const total = (this.db.prepare(countSql).get(...params) as any)?.n ?? 0;
+    return { total, rows };
+  }
+
+  // Distinct projects that have at least one indexed segment. Used for the
+  // unified search page's project filter.
+  segmentProjects(): string[] {
+    const rows = this.db.prepare(`
+      SELECT DISTINCT s.project_path
+      FROM transcript_segments seg
+      JOIN sessions s ON s.id = seg.session_id
+      WHERE s.project_path IS NOT NULL AND s.project_path <> ''
+      ORDER BY s.project_path
+    `).all() as any[];
+    return rows.map(r => r.project_path);
   }
 }

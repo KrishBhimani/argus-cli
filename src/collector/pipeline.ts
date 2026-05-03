@@ -2,8 +2,9 @@ import { basename } from 'node:path';
 import type { Adapter } from '../adapters/adapter.js';
 import type { Repository } from '../store/repository.js';
 import type { PricingTable } from '../pricing/types.js';
-import type { Session, ToolCall } from '../schema/types.js';
+import type { Session, ToolCall, TranscriptSegment } from '../schema/types.js';
 import type { RawToolCall } from '../adapters/claude_code/extract_tool_calls.js';
+import type { RawSegment } from '../adapters/claude_code/extract_transcript.js';
 import { buildSession, buildTurn } from './aggregate.js';
 import { rollupSubAgents } from './rollup_subagents.js';
 import { ingestClaudeCodeFile } from '../adapters/claude_code/ingest_file.js';
@@ -22,6 +23,19 @@ function toToolCall(r: RawToolCall, sessionId: string): ToolCall {
     input_size: r.input_size,
     subagent_type: r.subagent_type,
     timestamp: r.timestamp,
+  };
+}
+
+// Map adapter-local RawSegment → persisted TranscriptSegment. uid is
+// "{session_id}:{line_uuid}:{block_index}", stable per Claude line uuid +
+// block index, so re-ingest of the same bytes upserts in place.
+function toSegment(r: RawSegment, sessionId: string): TranscriptSegment {
+  return {
+    uid: `${sessionId}:${r.uid_suffix}`,
+    session_id: sessionId,
+    timestamp: r.timestamp,
+    role: r.role,
+    text: r.text,
   };
 }
 
@@ -61,6 +75,11 @@ export async function ingestFile(adapter: Adapter, filePath: string, repo: Repos
     repo.upsertToolCalls(result.tool_calls.map(r => toToolCall(r, sessionId)));
   }
 
+  // Same for transcript segments (Slice 2).
+  if (result.segments && result.segments.length) {
+    repo.upsertTranscriptSegments(result.segments.map(r => toSegment(r, sessionId)));
+  }
+
   // Sub-agents: each sub-agent JSONL becomes its own session under <sessionId>/<filename>.
   let subSessions: Session[] = [];
   if (adapter.agent === 'claude_code' && !filePath.includes('subagents')) {
@@ -78,6 +97,9 @@ export async function ingestFile(adapter: Adapter, filePath: string, repo: Repos
       for (const raw of subResult.result.turns) repo.upsertTurn(buildTurn(raw, subSessionId, table));
       if (subResult.result.tool_calls && subResult.result.tool_calls.length) {
         repo.upsertToolCalls(subResult.result.tool_calls.map(r => toToolCall(r, subSessionId)));
+      }
+      if (subResult.result.segments && subResult.result.segments.length) {
+        repo.upsertTranscriptSegments(subResult.result.segments.map(r => toSegment(r, subSessionId)));
       }
 
       // Recompute the sub-session totals from the FULL set of stored turns.

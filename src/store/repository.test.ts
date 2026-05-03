@@ -144,4 +144,37 @@ describe('Repository', () => {
     expect(r.total).toBe(2);
     expect(r.rows.every(row => row.snippet.includes('<mark>'))).toBe(true);
   });
+
+  it('upserts transcript segments and FTS search returns matches', () => {
+    repo.upsertSession(SESSION);
+    repo.upsertTranscriptSegments([
+      { uid: 'claude_code:s1:u1:0', session_id: SESSION.id, timestamp: '2026-05-01T10:00:00Z', role: 'user', text: 'how do I check ccusage output' },
+      { uid: 'claude_code:s1:a1:0', session_id: SESSION.id, timestamp: '2026-05-01T10:00:01Z', role: 'assistant', text: 'ccusage prints summary statistics' },
+      { uid: 'claude_code:s1:a2:0', session_id: SESSION.id, timestamp: '2026-05-01T10:00:02Z', role: 'assistant', text: 'unrelated text' },
+    ]);
+    const r = repo.searchTranscripts({ q: 'ccusage', limit: 10 });
+    expect(r.total).toBe(2);
+    expect(r.rows.every(row => row.snippet.includes('<mark>'))).toBe(true);
+  });
+
+  it('searchTranscripts respects role filter', () => {
+    repo.upsertSession(SESSION);
+    repo.upsertTranscriptSegments([
+      { uid: 'claude_code:s1:u1:0', session_id: SESSION.id, timestamp: '2026-05-01T10:00:00Z', role: 'user', text: 'find ccusage' },
+      { uid: 'claude_code:s1:a1:0', session_id: SESSION.id, timestamp: '2026-05-01T10:00:01Z', role: 'assistant', text: 'about ccusage' },
+    ]);
+    const userOnly = repo.searchTranscripts({ q: 'ccusage', limit: 10, roles: ['user'] });
+    expect(userOnly.total).toBe(1);
+    expect(userOnly.rows[0].role).toBe('user');
+  });
+
+  it('searchTranscripts is upsert-idempotent (same uid, no duplicates)', () => {
+    repo.upsertSession(SESSION);
+    const seg = { uid: 'claude_code:s1:u1:0', session_id: SESSION.id, timestamp: '2026-05-01T10:00:00Z', role: 'user' as const, text: 'ccusage v1' };
+    repo.upsertTranscriptSegments([seg]);
+    repo.upsertTranscriptSegments([{ ...seg, text: 'ccusage v2 updated' }]);
+    expect(repo.countSegmentsForSession(SESSION.id)).toBe(1);
+    const r = repo.searchTranscripts({ q: 'updated', limit: 10 });
+    expect(r.total).toBe(1);
+  });
 });

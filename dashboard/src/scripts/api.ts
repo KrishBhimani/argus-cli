@@ -80,4 +80,34 @@ export const api = {
   },
   promptStats: () => fetch('/api/prompts/stats').then(r => r.json() as Promise<{ total: number; projects: number; oldest_ms: number | null }>),
   promptProjects: () => fetch('/api/prompts/projects').then(r => r.json() as Promise<{ projects: string[] }>),
+  search: (params: { q?: string; limit?: number; project?: string; includeSlash?: boolean; roles?: string[] }) => {
+    const sp = new URLSearchParams();
+    if (params.q) sp.set('q', params.q);
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.project) sp.set('project', params.project);
+    if (params.includeSlash) sp.set('include_slash', '1');
+    if (params.roles && params.roles.length) sp.set('roles', params.roles.join(','));
+    return fetch('/api/search?' + sp.toString()).then(r => r.json() as Promise<{
+      total: number;
+      prompt_total: number;
+      transcript_total: number;
+      results: Array<{
+        kind: 'prompt' | 'transcript';
+        role: string;
+        timestamp_ms: number;
+        project_path: string | null;
+        text: string;
+        snippet: string;
+        pasted_chars: number;
+        session_id: string | null;
+      }>;
+    }>);
+  },
+  sessionTranscriptSearch: (id: string, q: string, limit = 100) => {
+    const sp = new URLSearchParams({ q, limit: String(limit) });
+    return fetch(`/api/sessions/${encodeURIComponent(id)}/transcript?${sp.toString()}`).then(r => r.json() as Promise<{
+      total: number;
+      segments: Array<{ uid: string; timestamp: string; role: string; text: string; snippet: string }>;
+    }>);
+  },
 };
