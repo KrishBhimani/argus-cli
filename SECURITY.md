@@ -58,8 +58,13 @@ The following are **not** security issues for the purpose of this policy:
   `~/.argus/argus.db`. (They can read `~/.claude/` directly anyway.)
 - A user runs `argus start --host 0.0.0.0` and someone on their LAN
   reads the dashboard. The warning message at startup is intentional.
-- Cost figures don't match `ccusage` exactly. Argus is a different
-  bucketing strategy; not a security issue.
+- Cost figures don't match `ccusage` exactly. After the windowed-
+  aggregation fix the two now use the same per-turn bucketing, but
+  small residual differences remain: (a) argus uses a bundled pricing
+  table while ccusage fetches LiteLLM live — run
+  `argus pricing refresh` to close the gap; (b) argus distinguishes
+  5-minute vs 1-hour cache-write rates where ccusage uses one flat
+  rate. Both are deliberate choices, not security issues.
 - npm `audit --omit=dev` flags a transitive devDependency vulnerability.
   devDependencies don't ship to package consumers.
 

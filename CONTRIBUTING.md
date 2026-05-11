@@ -6,6 +6,9 @@ running it?". Bug fixes, docs improvements, and small features are all
 welcome — please skim this file before opening a big PR so we're not
 working at cross-purposes.
 
+If you're new to the codebase, **read [ARCHITECTURE.md](./ARCHITECTURE.md)
+first** — it's a 5-minute tour of how the pieces fit together.
+
 ## Quick start
 
 ```sh
@@ -91,6 +94,16 @@ hand-edit them. If you need to change pricing logic, look at
 Append-only. Never edit a published migration. Add a new `MIGRATION_N+1`
 and bump the `schema_version` check in `db.ts`. SQLite in production
 has data that depends on the exact SQL that already ran.
+
+### Windowed aggregations
+
+For any "last N days" / windowed view, query the **`turns`** table by
+`timestamp`, NOT the **`sessions`** table by `started_at`. Session
+totals are pre-summed across the session's lifetime — using them for
+windowed views silently drops activity in sessions that started before
+the window and dumps multi-day spend onto the session's start date in
+heatmaps. The canonical helper is `Repository.aggregateTurnsByDay()`.
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the data-model rationale.
 
 ### Security model
 
