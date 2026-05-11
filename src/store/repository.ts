@@ -186,6 +186,56 @@ export class Repository {
     return { total: row?.total ?? 0, errors: row?.errors ?? 0 };
   }
 
+  // Per-turn aggregation for windowed views. Returns one row per
+  // (day, model, session_id) tuple inside the cutoff. Callers re-aggregate
+  // however they need (per-day totals, per-model breakdown, per-session
+  // active-set, etc.).
+  //
+  // Why this exists: /api/overview and /api/trends used to aggregate
+  // session LIFETIME totals filtered by session.started_at >= cutoff. That
+  // misses two things ccusage captures correctly:
+  //   1. Sessions that STARTED before the window but had turns IN the
+  //      window (e.g. resumed sessions) were excluded entirely. On a real
+  //      install this can hide 20-30% of token activity.
+  //   2. Long-running sessions had ALL their lifetime cost dumped on the
+  //      session's START day in the heatmap, instead of spread across the
+  //      days when turns actually happened.
+  // Aggregating from turns.timestamp fixes both at once.
+  //
+  // The `session_id NOT LIKE '%/%'` mirrors the JS-side isTopLevel(id)
+  // check — sub-agent rollup ids contain '/' and their turns are already
+  // attributed to the parent session via the rollup pipeline.
+  //
+  // cutoffIso semantics match toolCallsTotal: pass '' for "all time"
+  // since every real ISO timestamp sorts above the empty string.
+  aggregateTurnsByDay(cutoffIso: string): Array<{
+    day: string;
+    model: string;
+    session_id: string;
+    cost: number;
+    fresh_input: number;
+    output: number;
+    cache_read: number;
+    cache_write: number;
+  }> {
+    return this.db.prepare(`
+      SELECT
+        substr(timestamp, 1, 10) AS day,
+        model,
+        session_id,
+        COALESCE(SUM(cost_usd), 0) AS cost,
+        COALESCE(SUM(fresh_input_tokens), 0) AS fresh_input,
+        COALESCE(SUM(output_tokens), 0) AS output,
+        COALESCE(SUM(cache_read_tokens), 0) AS cache_read,
+        COALESCE(SUM(cache_write_tokens), 0) AS cache_write
+      FROM turns
+      WHERE timestamp >= ?
+        AND session_id NOT LIKE '%/%'
+      GROUP BY day, model, session_id
+      ORDER BY day ASC
+    `).all(cutoffIso) as any[];
+  }
+
   // MCP rollup. Tool names matching the convention `mcp__<server>__<tool>`
   // are captured by the LIKE; the regex/split lives in JS so a server name
   // containing extra underscores doesn't fool the SQL.

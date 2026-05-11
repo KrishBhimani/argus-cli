@@ -1,0 +1,13 @@
+import{a as f,e as y,n as w,t as a,u as d}from"./format.CWX3gsCt.js";import{u as b,i as h,a as _,b as k,c as S,d as x,e as $}from"./installCanvasRenderer.4JmZ8sp0.js";b([_,k,S,x,$]);const r=c=>document.querySelector(c),l=r("#w");let n;async function u(){const c=(await f.sessions("?limit=100000")).sessions,m=l.value==="7d"?Date.now()-7*864e5:l.value==="30d"?Date.now()-30*864e5:0,p=c.filter(t=>new Date(t.started_at).getTime()>=m),i=new Map;for(const t of p){const e=t.primary_model,o=i.get(e)??{sessions:0,fresh:0,output:0,cr:0,cw:0,cost:0};o.sessions+=1,o.fresh+=t.total_fresh_input_tokens,o.output+=t.total_output_tokens,o.cr+=t.total_cache_read_tokens,o.cw+=t.total_cache_write_tokens,o.cost+=t.total_cost_usd,i.set(e,o)}const s=[...i.entries()].sort((t,e)=>e[1].cost-t[1].cost);if(s.length===0){r("#bar").innerHTML='<p class="empty">No sessions in this window.</p>',r("#t tbody").innerHTML='<tr><td colspan="9" class="empty">—</td></tr>';return}n?.dispose(),n=h(r("#bar")),n.setOption({textStyle:{color:"#9ba6b3"},tooltip:{trigger:"axis",backgroundColor:"#1c222d",borderColor:"#262d3a",textStyle:{color:"#e6edf3",fontSize:12},valueFormatter:t=>t.toLocaleString()+" tokens"},legend:{top:0,textStyle:{color:"#9ba6b3",fontSize:11}},grid:{left:140,right:30,top:36,bottom:28},xAxis:{type:"value",axisLabel:{color:"#6b7585",fontSize:11,formatter:t=>t>=1e6?(t/1e6).toFixed(1)+"M":t>=1e3?(t/1e3).toFixed(0)+"k":String(t)},splitLine:{lineStyle:{color:"#1c222d"}},axisLine:{show:!1}},yAxis:{type:"category",data:s.map(([t])=>t).reverse(),axisLabel:{color:"#6b7585",fontSize:11},axisLine:{show:!1},axisTick:{show:!1}},series:[{name:"Fresh input",type:"bar",stack:"t",data:s.map(([t,e])=>e.fresh).reverse(),itemStyle:{color:"#f0883e"}},{name:"Output",type:"bar",stack:"t",data:s.map(([t,e])=>e.output).reverse(),itemStyle:{color:"#bc8cff"}},{name:"Cache read",type:"bar",stack:"t",data:s.map(([t,e])=>e.cr).reverse(),itemStyle:{color:"#58a6ff"}},{name:"Cache write",type:"bar",stack:"t",data:s.map(([t,e])=>e.cw).reverse(),itemStyle:{color:"#7ee787"}}]}),r("#t tbody").innerHTML=s.map(([t,e])=>`
+        <tr>
+          <td><code>${y(t)}</code></td>
+          <td class="num">${w(e.sessions)}</td>
+          <td class="num">${a(e.fresh)}</td>
+          <td class="num">${a(e.output)}</td>
+          <td class="num">${a(e.cr)}</td>
+          <td class="num">${a(e.cw)}</td>
+          <td class="num tok">${a(e.fresh+e.output+e.cr+e.cw)}</td>
+          <td class="num cost">~${d(e.cost)}</td>
+          <td class="num">~${d(e.sessions?e.cost/e.sessions:0)}</td>
+        </tr>
+      `).join("")}l.addEventListener("change",u);u();window.addEventListener("resize",()=>n?.resize());

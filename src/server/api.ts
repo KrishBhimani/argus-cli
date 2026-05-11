@@ -111,51 +111,94 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
 
   app.get('/api/overview', (c) => {
     const window = c.req.query('window') ?? '7d';
-    const days = WINDOWS[window];
-    const cutoff = days ? new Date(Date.now() - days * 86_400_000).toISOString() : '0';
-    const all = repo.listSessions({ limit: 100_000 }).filter(s => isTopLevel(s.id) && s.started_at >= cutoff);
+    const cutoff = cutoffIsoForWindow(window);
 
-    const totals = all.reduce((a, s) => ({
-      cost: a.cost + s.total_cost_usd,
-      tokens: a.tokens + s.total_fresh_input_tokens + s.total_output_tokens + s.total_cache_read_tokens + s.total_cache_write_tokens,
-    }), { cost: 0, tokens: 0 });
+    // Turn-level aggregation. See repository.aggregateTurnsByDay for why
+    // session-level filtering by started_at was wrong (sessions that started
+    // before the window but had turns inside it were dropped entirely; the
+    // heatmap dumped each session's lifetime cost on its start day).
+    const rows = repo.aggregateTurnsByDay(cutoff);
 
-    const split: Record<string, { cost: number; sessions: number; tokens: number }> = {};
-    for (const s of all) {
-      split[s.agent] ??= { cost: 0, sessions: 0, tokens: 0 };
-      split[s.agent].cost += s.total_cost_usd;
-      split[s.agent].sessions += 1;
-      split[s.agent].tokens += s.total_fresh_input_tokens + s.total_output_tokens + s.total_cache_read_tokens + s.total_cache_write_tokens;
+    // session_id → agent lookup, scoped to sessions that actually appear in
+    // the turn aggregation. Cheap: one listSessions read at startup of the
+    // request, indexed by id.
+    const sessionAgent = new Map<string, string>();
+    for (const s of repo.listSessions({ limit: 100_000 })) {
+      sessionAgent.set(s.id, s.agent);
     }
 
+    let totalCost = 0;
+    let totalTokens = 0;
     const byDay: Record<string, number> = {};
-    for (const s of all) {
-      const day = s.started_at.slice(0, 10);
-      byDay[day] = (byDay[day] ?? 0) + s.total_cost_usd;
+    const split: Record<string, { cost: number; sessions: number; tokens: number }> = {};
+    const sessionsPerAgent: Record<string, Set<string>> = {};
+    const activeSessions = new Set<string>();
+
+    for (const r of rows) {
+      const tokens = r.fresh_input + r.output + r.cache_read + r.cache_write;
+      totalCost += r.cost;
+      totalTokens += tokens;
+      byDay[r.day] = (byDay[r.day] ?? 0) + r.cost;
+      activeSessions.add(r.session_id);
+      const agent = sessionAgent.get(r.session_id) ?? 'unknown';
+      split[agent] ??= { cost: 0, sessions: 0, tokens: 0 };
+      split[agent].cost += r.cost;
+      split[agent].tokens += tokens;
+      // sessions is a unique-session-id count per agent — accumulate via a
+      // set then write the count at the end so a session contributing
+      // multiple (day, model) rows isn't double-counted.
+      (sessionsPerAgent[agent] ??= new Set<string>()).add(r.session_id);
+    }
+    for (const [agent, set] of Object.entries(sessionsPerAgent)) {
+      split[agent].sessions = set.size;
     }
 
     return c.json({
-      window, total_cost_usd: totals.cost, total_tokens: totals.tokens,
-      session_count: all.length, agent_split: split, cost_by_day: byDay,
+      window, total_cost_usd: totalCost, total_tokens: totalTokens,
+      session_count: activeSessions.size, agent_split: split, cost_by_day: byDay,
     });
   });
 
   app.get('/api/trends', (c) => {
     const granularity = (c.req.query('granularity') ?? 'day') as 'day' | 'week' | 'month';
     const groupBy = (c.req.query('groupBy') ?? 'agent') as 'agent' | 'model';
-    const all = repo.listSessions({ limit: 100_000 }).filter(s => isTopLevel(s.id) && isMeaningful(s));
-    const bucket = (iso: string) => granularity === 'day' ? iso.slice(0, 10)
-      : granularity === 'week' ? `${iso.slice(0, 4)}-W${weekOf(iso)}`
-      : iso.slice(0, 7);
-    const points: Record<string, Record<string, { cost: number; tokens: number; sessions: number }>> = {};
-    for (const s of all) {
-      const b = bucket(s.started_at);
-      const k = groupBy === 'agent' ? s.agent : s.primary_model;
+
+    // Same root cause + same fix as /api/overview: aggregate from turns by
+    // their own timestamp, not from session lifetime totals keyed on
+    // session.started_at. A session that started in month N-1 but had turns
+    // in month N should appear in N's bucket — the session-based version
+    // silently dropped it.
+    const rows = repo.aggregateTurnsByDay(''); // '' = all time
+    const sessionAgent = new Map<string, string>();
+    for (const s of repo.listSessions({ limit: 100_000 })) {
+      sessionAgent.set(s.id, s.agent);
+    }
+
+    const rebucket = (day: string) => granularity === 'day' ? day
+      : granularity === 'week' ? `${day.slice(0, 4)}-W${weekOf(day)}`
+      : day.slice(0, 7);
+
+    const points: Record<string, Record<string, { cost: number; tokens: number; sessions: number; _sessionSet?: Set<string> }>> = {};
+    for (const r of rows) {
+      const b = rebucket(r.day);
+      const k = groupBy === 'agent' ? (sessionAgent.get(r.session_id) ?? 'unknown') : r.model;
       points[b] ??= {};
-      points[b][k] ??= { cost: 0, tokens: 0, sessions: 0 };
-      points[b][k].cost += s.total_cost_usd;
-      points[b][k].tokens += s.total_fresh_input_tokens + s.total_output_tokens;
-      points[b][k].sessions += 1;
+      points[b][k] ??= { cost: 0, tokens: 0, sessions: 0, _sessionSet: new Set<string>() };
+      points[b][k].cost += r.cost;
+      // Preserve the prior "fresh + output" token semantic for trends so
+      // existing dashboards don't shift unexpectedly. The aggregation
+      // source is now correct (turn timestamps), the WHAT-is-counted is
+      // unchanged.
+      points[b][k].tokens += r.fresh_input + r.output;
+      points[b][k]._sessionSet!.add(r.session_id);
+    }
+    // Finalize unique-session counts per (bucket, group) and strip the
+    // temporary _sessionSet helper before serializing.
+    for (const groups of Object.values(points)) {
+      for (const k of Object.keys(groups)) {
+        groups[k].sessions = groups[k]._sessionSet!.size;
+        delete groups[k]._sessionSet;
+      }
     }
     return c.json({ granularity, groupBy, points: Object.entries(points).sort().map(([bucket, groups]) => ({ bucket, groups })) });
   });
