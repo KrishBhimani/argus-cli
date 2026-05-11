@@ -85,7 +85,8 @@ describe('API', () => {
   // Regression: a session that STARTED before the 7-day window but had a
   // turn INSIDE the window used to be excluded entirely from /api/overview
   // (because the filter was session.started_at >= cutoff). With turn-level
-  // aggregation it must now appear in totals and cost_by_day.
+  // aggregation it must now appear in totals, cost_by_day, top_sessions,
+  // and cost_by_model.
   it('GET /api/overview includes turns from sessions that started before the window', async () => {
     const oldStart = new Date(Date.now() - 86_400_000 * 21).toISOString(); // 3 weeks ago
     const recentTurn = new Date(Date.now() - 86_400_000 * 2).toISOString(); // 2 days ago
@@ -97,6 +98,43 @@ describe('API', () => {
     expect(body.total_cost_usd).toBeCloseTo(4.25, 4);
     expect(body.session_count).toBe(1);
     expect(body.cost_by_day[recentTurn.slice(0, 10)]).toBeCloseTo(4.25, 4);
+    // Top Sessions table needs the resumed session to show up too —
+    // previously the dashboard filtered by started_at and dropped it.
+    expect(body.top_sessions).toHaveLength(1);
+    expect(body.top_sessions[0].id).toBe('long-runner');
+    expect(body.top_sessions[0].window_cost_usd).toBeCloseTo(4.25, 4);
+    expect(body.top_sessions[0].started_at).toBe(oldStart); // metadata preserved
+    // Top Models chart needs the model too — same bug pattern, same fix.
+    expect(body.cost_by_model['claude-opus-4-7']).toBeCloseTo(4.25, 4);
+  });
+
+  // Per-row Option B: each top_sessions row reports the session's
+  // contribution IN THE WINDOW, not its lifetime total. Sum of the rows'
+  // window_cost_usd must equal the hero's total_cost_usd.
+  it('GET /api/overview top_sessions rows show window-only totals, summing to the hero', async () => {
+    const now = Date.now();
+    repo.upsertSession(SESSION('a', new Date(now - 86_400_000 * 2).toISOString()));
+    repo.upsertSession(SESSION('b', new Date(now - 86_400_000 * 30).toISOString())); // started outside window
+    repo.upsertTurn(TURN('a-t1', 'a', new Date(now - 86_400_000 * 2).toISOString(), { cost: 1.0 }));
+    repo.upsertTurn(TURN('a-t2', 'a', new Date(now - 86_400_000 * 1).toISOString(), { cost: 2.0 }));
+    repo.upsertTurn(TURN('b-t1', 'b', new Date(now - 86_400_000 * 3).toISOString(), { cost: 3.0 }));  // resumed today
+    // A turn from session 'b' that's outside the window — must NOT count.
+    repo.upsertTurn(TURN('b-old', 'b', new Date(now - 86_400_000 * 30).toISOString(), { cost: 99.0 }));
+
+    const r = await app.request('/api/overview?window=7d');
+    const body = await r.json();
+
+    // hero = sum of per-session window cost
+    const sumRows = body.top_sessions.reduce((acc: number, s: any) => acc + s.window_cost_usd, 0);
+    expect(sumRows).toBeCloseTo(body.total_cost_usd, 4);
+    expect(body.total_cost_usd).toBeCloseTo(6.0, 4); // 1+2+3, NOT 1+2+3+99
+    // 'a' has 2 days active in window, 'b' has 1
+    const aRow = body.top_sessions.find((s: any) => s.id === 'a');
+    const bRow = body.top_sessions.find((s: any) => s.id === 'b');
+    expect(aRow.window_cost_usd).toBeCloseTo(3.0, 4);
+    expect(aRow.days_active).toBe(2);
+    expect(bRow.window_cost_usd).toBeCloseTo(3.0, 4); // lifetime would be 102 — but we want WINDOW
+    expect(bRow.days_active).toBe(1);
   });
 
   // Regression: cost_by_day used to key on session.started_at, so a multi-

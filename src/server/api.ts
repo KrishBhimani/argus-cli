@@ -119,28 +119,34 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     // heatmap dumped each session's lifetime cost on its start day).
     const rows = repo.aggregateTurnsByDay(cutoff);
 
-    // session_id → agent lookup, scoped to sessions that actually appear in
-    // the turn aggregation. Cheap: one listSessions read at startup of the
-    // request, indexed by id.
-    const sessionAgent = new Map<string, string>();
+    // Full session metadata lookup, indexed by id. Used for the agent split,
+    // the top-sessions table, etc. — one pass instead of N getSession calls.
+    const sessionMeta = new Map<string, Session>();
     for (const s of repo.listSessions({ limit: 100_000 })) {
-      sessionAgent.set(s.id, s.agent);
+      sessionMeta.set(s.id, s);
     }
 
     let totalCost = 0;
     let totalTokens = 0;
     const byDay: Record<string, number> = {};
+    const costByModel: Record<string, number> = {};
     const split: Record<string, { cost: number; sessions: number; tokens: number }> = {};
     const sessionsPerAgent: Record<string, Set<string>> = {};
     const activeSessions = new Set<string>();
+    // Per-session totals bucketed to THIS WINDOW. The Top Sessions table on
+    // the Overview page is built from this, so each row's cost/tokens reflects
+    // what the session contributed in the window, not its lifetime total.
+    // Sum of all rows' cost === totalCost above.
+    const sessionWindow = new Map<string, { cost: number; tokens: number; days: Set<string> }>();
 
     for (const r of rows) {
       const tokens = r.fresh_input + r.output + r.cache_read + r.cache_write;
       totalCost += r.cost;
       totalTokens += tokens;
       byDay[r.day] = (byDay[r.day] ?? 0) + r.cost;
+      costByModel[r.model] = (costByModel[r.model] ?? 0) + r.cost;
       activeSessions.add(r.session_id);
-      const agent = sessionAgent.get(r.session_id) ?? 'unknown';
+      const agent = sessionMeta.get(r.session_id)?.agent ?? 'unknown';
       split[agent] ??= { cost: 0, sessions: 0, tokens: 0 };
       split[agent].cost += r.cost;
       split[agent].tokens += tokens;
@@ -148,14 +154,45 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
       // set then write the count at the end so a session contributing
       // multiple (day, model) rows isn't double-counted.
       (sessionsPerAgent[agent] ??= new Set<string>()).add(r.session_id);
+
+      const sw = sessionWindow.get(r.session_id) ?? { cost: 0, tokens: 0, days: new Set<string>() };
+      sw.cost += r.cost;
+      sw.tokens += tokens;
+      sw.days.add(r.day);
+      sessionWindow.set(r.session_id, sw);
     }
     for (const [agent, set] of Object.entries(sessionsPerAgent)) {
       split[agent].sessions = set.size;
     }
 
+    // top_sessions: window-bucketed cost/tokens per session, joined with
+    // session metadata. Sorted by window cost desc, capped at 20. Replaces
+    // the dashboard's old pattern of fetching every session and
+    // client-side filtering by started_at — which silently dropped resumed
+    // sessions and showed lifetime totals instead of window totals.
+    const topSessions = [...sessionWindow.entries()]
+      .map(([id, w]) => {
+        const meta = sessionMeta.get(id);
+        if (!meta) return null;
+        return {
+          id,
+          started_at: meta.started_at,
+          project_path: meta.project_path,
+          primary_model: meta.primary_model,
+          window_cost_usd: w.cost,
+          window_tokens: w.tokens,
+          days_active: w.days.size,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => b.window_cost_usd - a.window_cost_usd)
+      .slice(0, 20);
+
     return c.json({
       window, total_cost_usd: totalCost, total_tokens: totalTokens,
       session_count: activeSessions.size, agent_split: split, cost_by_day: byDay,
+      cost_by_model: costByModel,
+      top_sessions: topSessions,
     });
   });
 
