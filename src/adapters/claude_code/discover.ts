@@ -1,5 +1,5 @@
 import { readdir, stat, realpath } from 'node:fs/promises';
-import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join, dirname, basename, sep } from 'node:path';
 
 // Windows filesystems are case-insensitive but JS string comparison is not.
@@ -39,9 +39,14 @@ export async function discoverSessionFiles(claudeRoot: string): Promise<string[]
   if (!existsSync(projectsDir)) return [];
   // Canonicalize the root once. All subsequent realpath checks compare
   // against this so we don't have to handle WSL/Cygwin path quirks per
-  // candidate.
+  // candidate. MUST use the async `realpath` to match the per-candidate
+  // calls below: on Windows, `realpathSync` preserves 8.3 short names
+  // (e.g. "C:\Users\RUNNER~1\...") while async `realpath` expands them
+  // to long form ("C:\Users\runneradmin\..."). Mixing the two makes the
+  // containment check silently reject every candidate on GitHub Windows
+  // runners where the temp dir comes back in short-name form.
   let canonicalRoot: string;
-  try { canonicalRoot = realpathSync(claudeRoot); }
+  try { canonicalRoot = await realpath(claudeRoot); }
   catch { return []; }
   const out: string[] = [];
   for (const entry of await readdir(projectsDir)) {
