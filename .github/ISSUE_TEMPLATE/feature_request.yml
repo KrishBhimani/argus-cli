@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest a new feature or change in behavior
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Argus prioritizes "things you cannot get from `ccusage` or other
+        existing tools" — feature ideas that lean on the local-only data
+        in `~/.claude/` are especially welcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Lead with the problem, not the solution. What can't you do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        How you imagine it working — what would you click on, what would you
+        see? Screenshots of mockups, references to other tools, or rough
+        sketches all welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other ways to solve this you ruled out, and why?
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Related issues, links, screenshots — anything else useful.
+    validations:
+      required: false
