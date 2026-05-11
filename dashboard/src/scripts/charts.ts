@@ -98,6 +98,29 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
   // 3-tuple [x, y, value] or it conflicts with the heatmap series' default dimensions.
   const cellDate = new Map<string, string>();
   let max = 0;
+
+  // Each column in the heatmap is a CALENDAR week (Mon→Sun). The previous
+  // implementation bucketed by "every 7 days from the oldest day in the
+  // lookback," which only coincidentally produced Mon-Sun columns when the
+  // window happened to start on a Monday. For any other start day, each
+  // column straddled two calendar weeks and Mon/Tue would end up showing
+  // dates from a DIFFERENT week than Wed-Sun in the same column — visible
+  // in the screenshot from 2026-05-11 where col 0 was Mon=Feb16, Tue=Feb17,
+  // Wed-Sun=Feb11-15.
+  //
+  // Fix: compute each day's calendar-week-start (Monday at UTC 00:00) and
+  // derive weekIdx from that. Columns now always represent a single
+  // Mon-Sun week. Cells before the lookback window or after today are
+  // simply omitted (ECharts renders missing cells as blank grid slots),
+  // which is the right UX — a partial first/last week reads cleanly.
+  const monOfWeek = (ms: number): number => {
+    const dow = new Date(ms).getUTCDay();         // 0=Sun..6=Sat
+    const daysSinceMon = (dow + 6) % 7;            // Mon→0, Tue→1, ..., Sun→6
+    return ms - daysSinceMon * 86_400_000;
+  };
+  const oldestDayMs = todayUtcMidnightMs - (lookbackDays - 1) * 86_400_000;
+  const firstWeekMonMs = monOfWeek(oldestDayMs);
+
   for (let i = lookbackDays - 1; i >= 0; i--) {
     const dayMs = todayUtcMidnightMs - i * 86_400_000;
     const d = new Date(dayMs);
@@ -107,11 +130,13 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
     // Remap JS dayOfWeek (0=Sun..6=Sat) to row index for our Mon-first axis
     // ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']: Sun→6, Mon→0, Tue→1, ..., Sat→5
     const rowIdx = (d.getUTCDay() + 6) % 7;
-    const weekIdx = Math.floor((lookbackDays - 1 - i) / 7);
+    const weekIdx = Math.round((monOfWeek(dayMs) - firstWeekMonMs) / (7 * 86_400_000));
     cells.push([weekIdx, rowIdx, +v.toFixed(4)]);
     cellDate.set(`${weekIdx}-${rowIdx}`, key);
   }
-  const weeks = Math.ceil(lookbackDays / 7);
+  // Total columns spans first calendar week containing oldest day through
+  // the calendar week containing today.
+  const weeks = Math.round((monOfWeek(todayUtcMidnightMs) - firstWeekMonMs) / (7 * 86_400_000)) + 1;
   c.setOption({
     ...THEME,
     tooltip: {
