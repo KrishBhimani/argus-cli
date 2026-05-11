@@ -465,7 +465,18 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
     });
   });
 
-  app.get('/api/ingest/status', (c) => c.json(deps.ingestStatus()));
+  app.get('/api/ingest/status', (c) => {
+    // ingestStatus().processed/total only reflect the FIRST-PASS startup
+    // ingest — once the backfill finishes those counters freeze. New
+    // sessions picked up by the chokidar watcher land in the DB but
+    // don't move those numbers. sessionCount reads the real, current
+    // count from the DB using the same predicates the Sessions page
+    // uses, so the footer reflects truth (and updates as new sessions
+    // are watched in).
+    const sessionCount = repo.listSessions({ limit: 100_000 })
+      .filter(s => isTopLevel(s.id) && isMeaningful(s)).length;
+    return c.json({ ...deps.ingestStatus(), sessionCount });
+  });
   app.get('/api/pricing', (c) => c.json({ version: deps.pricingTableVersion }));
 
   app.get('/api/export.json', (c) => {

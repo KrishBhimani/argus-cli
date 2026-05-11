@@ -41,7 +41,12 @@ const path = Astro.url.pathname;
         const ip = document.getElementById('ingest-status');
         if (ip) {
           if (s.foregroundComplete && s.pending === 0) {
-            ip.textContent = `Indexed ${s.processed} sessions`;
+            // sessionCount comes from the DB and reflects sessions
+            // picked up by the watcher AFTER startup too — see
+            // /api/ingest/status. Fall back to s.processed if the
+            // server response predates that field.
+            const n = typeof s.sessionCount === 'number' ? s.sessionCount : s.processed;
+            ip.textContent = `Tracking ${n} sessions`;
             ip.classList.remove('busy');
           } else if (!s.foregroundComplete) {
             ip.textContent = `Ingesting recent... ${s.processed}/${s.total}`;
