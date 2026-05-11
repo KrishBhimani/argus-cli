@@ -130,7 +130,6 @@ src/pricing/          LiteLLM-derived price table + cost compute
 dashboard/            Astro source
 dashboard-dist/       Astro build output (shipped in npm tarball)
 pricing/              Bundled pricing JSON (shipped)
-docs/                 Specs, plans, feature backlog
 ```
 
 ## License
