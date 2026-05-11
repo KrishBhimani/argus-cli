@@ -46,20 +46,122 @@ import Default from '../layouts/Default.astro';
     <div>
       <div class="card">
         <h3>Ingest status</h3>
-        <pre id="status">…</pre>
+        <div id="status" style="font-size:0.85rem;"><span class="skel" style="width:8em;"></span></div>
       </div>
       <div class="card">
         <h3>Parse errors</h3>
-        <p id="err-count" style="color:var(--text-2);font-size:0.85rem;">…</p>
-        <pre id="errs" style="max-height:300px;overflow:auto;font-size:0.78rem;"></pre>
+        <p id="err-count" style="color:var(--text-2);font-size:0.85rem;margin-top:0;">…</p>
+        <div id="errs" style="max-height:420px;overflow-y:auto;overflow-x:hidden;"></div>
       </div>
     </div>
   </div>
 
   <script>
     import { api } from '../scripts/api';
+    import { escapeHtml } from '../scripts/format';
 
     const $ = (s: string) => document.querySelector(s) as HTMLElement;
+
+    // Convert raw key like "foregroundComplete" → "foreground complete"
+    function humanKey(k: string): string {
+      return k.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').toLowerCase().trim();
+    }
+
+    // Render a value with light type-aware formatting. Strings get a
+    // monospace tone; booleans become Yes/No with a color; numbers get
+    // tabular-num alignment.
+    function renderValue(v: unknown): string {
+      if (typeof v === 'boolean') {
+        return `<span style="color:${v ? 'var(--good)' : 'var(--text-2)'};">${v ? 'yes' : 'no'}</span>`;
+      }
+      if (typeof v === 'number') {
+        return `<span style="font-variant-numeric:tabular-nums;color:var(--text-0);">${v.toLocaleString()}</span>`;
+      }
+      if (v == null) return `<span style="color:var(--text-2);">—</span>`;
+      if (typeof v === 'object') {
+        // Nested object (rare for status) — fall back to compact JSON
+        return `<code style="font-size:0.78rem;">${escapeHtml(JSON.stringify(v))}</code>`;
+      }
+      return escapeHtml(String(v));
+    }
+
+    // Render the ingest status as a clean key/value list instead of
+    // dumping the raw JSON in a <pre>. The previous version produced a
+    // wide, indented blob that the user had to scroll horizontally.
+    function renderStatus(s: Record<string, unknown>): string {
+      const rows = Object.entries(s).map(([k, v]) => `
+        <div style="display:flex;justify-content:space-between;gap:1rem;padding:0.4rem 0;border-top:1px solid var(--border);">
+          <span style="color:var(--text-2);text-transform:uppercase;letter-spacing:0.05em;font-size:0.72rem;">${escapeHtml(humanKey(k))}</span>
+          <span>${renderValue(v)}</span>
+        </div>
+      `).join('');
+      return rows;
+    }
+
+    // Last path segment, e.g. "...\\xyz.jsonl" → "xyz.jsonl". Handles
+    // both POSIX and Windows separators since session files on disk
+    // use backslashes on Windows.
+    function basename(p: string): string {
+      const parts = p.split(/[\\/]/);
+      return parts[parts.length - 1] || p;
+    }
+
+    // Truncate a long file path to something like ".../parent/file.jsonl".
+    function shortPath(p: string, max = 70): string {
+      if (p.length <= max) return p;
+      const parts = p.split(/[\\/]/);
+      if (parts.length <= 3) return p;
+      return '.../' + parts.slice(-3).join('/');
+    }
+
+    // The parse-error reason field comes from zod as a JSON-stringified
+    // array of issue objects. Pretty-printing it inline saves the user
+    // from grepping through escaped newlines.
+    function prettyReason(raw: string): string {
+      try {
+        const issues = JSON.parse(raw);
+        if (Array.isArray(issues) && issues.length > 0) {
+          return issues.slice(0, 3).map((i: any) => {
+            const path = Array.isArray(i.path) && i.path.length ? ` at ${i.path.join('.')}` : '';
+            if (i.code === 'invalid_type') {
+              return `expected ${i.expected}, received ${i.received}${path}`;
+            }
+            return `${i.message || i.code}${path}`;
+          }).join('; ') + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '');
+        }
+      } catch { /* not JSON; fall through */ }
+      // Collapse the whitespace ruin from zod's pretty-printed JSON,
+      // then truncate. Loses some detail but it's better than a wall.
+      return raw.replace(/\s+/g, ' ').slice(0, 240);
+    }
+
+    // One error → one structured block. The raw line is hidden behind a
+    // <details> disclosure so the panel stays scannable; click to expand.
+    function renderError(err: any): string {
+      const file = err.file ?? 'unknown';
+      const name = basename(file);
+      const path = shortPath(file);
+      const reason = prettyReason(err.reason ?? '');
+      const raw = err.raw_line_truncated ?? '';
+      const offset = typeof err.byte_offset === 'number' && err.byte_offset >= 0
+        ? `offset ${err.byte_offset.toLocaleString()}`
+        : '';
+      return `
+        <div style="padding:0.7rem 0;border-bottom:1px solid var(--border);word-break:break-word;overflow-wrap:anywhere;">
+          <div style="display:flex;justify-content:space-between;gap:0.6rem;align-items:baseline;flex-wrap:wrap;">
+            <code style="color:var(--accent);background:none;padding:0;font-size:0.84rem;">${escapeHtml(name)}</code>
+            <span style="color:var(--text-2);font-size:0.72rem;font-variant-numeric:tabular-nums;">${escapeHtml(offset)}</span>
+          </div>
+          <div style="color:var(--text-2);font-size:0.7rem;margin-top:0.1rem;" title="${escapeHtml(file)}">${escapeHtml(path)}</div>
+          <div style="color:var(--text-0);font-size:0.82rem;margin-top:0.4rem;">${escapeHtml(reason)}</div>
+          ${raw ? `
+            <details style="margin-top:0.35rem;">
+              <summary style="cursor:pointer;color:var(--text-2);font-size:0.76rem;list-style:none;">▸ raw line</summary>
+              <pre style="margin:0.3rem 0 0;background:var(--bg-2);padding:0.5rem 0.7rem;border-radius:4px;font-size:0.72rem;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow-y:auto;">${escapeHtml(raw)}</pre>
+            </details>` : ''}
+        </div>
+      `;
+    }
 
     async function load() {
       const [p, e, s] = await Promise.all([
@@ -68,11 +170,11 @@ import Default from '../layouts/Default.astro';
         fetch('/api/ingest/status').then(r => r.json()),
       ]);
       $('#pv').textContent = p.version;
-      $('#status').textContent = JSON.stringify(s, null, 2);
+      $('#status').innerHTML = renderStatus(s);
       $('#err-count').textContent = e.errors.length === 0
         ? 'No parse errors recorded. Healthy.'
         : `${e.errors.length} recent parse error${e.errors.length === 1 ? '' : 's'}.`;
-      $('#errs').textContent = e.errors.length === 0 ? '' : JSON.stringify(e.errors, null, 2);
+      $('#errs').innerHTML = e.errors.length === 0 ? '' : e.errors.map(renderError).join('');
     }
 
     function pillBadge(label: string, color: string): string {
