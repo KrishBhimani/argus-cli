@@ -2,6 +2,16 @@ import { readdir, stat, realpath } from 'node:fs/promises';
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { join, dirname, basename, sep } from 'node:path';
 
+// Windows filesystems are case-insensitive but JS string comparison is not.
+// realpath() on Windows can return paths whose case differs from the input
+// (e.g. "C:\Users\Foo" vs "C:\users\foo"), and the GitHub Windows runner
+// surfaces temp dirs in 8.3 short-name form ("RUNNER~1") whose expansion
+// can vary. Without normalization, every safe-path check fails silently
+// and discovery returns an empty list. See e.g. the four CI failures fixed
+// in the commit that introduced this comment.
+const IS_WINDOWS = process.platform === 'win32';
+const normalize = (p: string) => IS_WINDOWS ? p.toLowerCase() : p;
+
 // Constrain a candidate path to live under the canonical root. realpath
 // resolves all symlinks; a hostile link planted at
 // ~/.claude/projects/foo/leak.jsonl that points to /etc/passwd would
@@ -14,8 +24,10 @@ async function safeRealpathUnder(candidate: string, canonicalRoot: string): Prom
     // Ensure the resolved path is the root itself or a descendant.
     // Without the trailing separator we could match e.g.
     // /home/user/.claudemalicious/x against /home/user/.claude.
-    if (resolved === canonicalRoot) return resolved;
-    if (resolved.startsWith(canonicalRoot + sep)) return resolved;
+    const a = normalize(resolved);
+    const b = normalize(canonicalRoot);
+    if (a === b) return resolved;
+    if (a.startsWith(b + sep)) return resolved;
     return null;
   } catch {
     return null;
