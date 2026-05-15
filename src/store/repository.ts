@@ -31,7 +31,41 @@ function isoToMs(iso: string | null | undefined): number | null {
 // for fast prompt → session linkage joins; consumers don't need them).
 function rowToSession(row: any): Session {
   const { started_at_ms: _a, ended_at_ms: _b, ...rest } = row;
-  return { ...rest, metadata: JSON.parse(rest.metadata) };
+  return {
+    ...rest,
+    metadata: JSON.parse(rest.metadata),
+    backend_agent: rest.backend_agent ?? null,
+  };
+}
+
+// Two-axis filter for windowed queries across the shared API surface.
+// Both fields optional → no filter. `agent` alone → narrow to that backend.
+// Both → narrow to that backend's named slice. The filter compiles down to
+// a couple of optional WHERE clauses, applied uniformly across every aggregate.
+export interface AgentFilter {
+  agent?: string;
+  backendAgent?: string;
+}
+
+// Build the WHERE-clause fragment + params for a filter. Used by every
+// aggregate that needs to narrow by (agent, backend_agent). The `prefix`
+// arg lets callers say "this column lives on `s.` (sessions)" or
+// "this column lives on `t.`/no-prefix (joined turns)". A single source of
+// truth keeps the filter behavior identical across endpoints.
+export function filterClause(filter: AgentFilter | undefined, sessionsAlias = ''): { sql: string; params: unknown[] } {
+  if (!filter) return { sql: '', params: [] };
+  const a = sessionsAlias ? `${sessionsAlias}.` : '';
+  const parts: string[] = [];
+  const params: unknown[] = [];
+  if (filter.agent) {
+    parts.push(`${a}agent = ?`);
+    params.push(filter.agent);
+  }
+  if (filter.backendAgent) {
+    parts.push(`${a}backend_agent = ?`);
+    params.push(filter.backendAgent);
+  }
+  return { sql: parts.length ? ' AND ' + parts.join(' AND ') : '', params };
 }
 
 export class Repository {
@@ -44,11 +78,11 @@ export class Repository {
       INSERT INTO sessions (id, agent, agent_version, project_path, started_at, ended_at, duration_sec,
         total_fresh_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_write_tokens,
         total_cost_usd, primary_model, turn_count, pricing_table_version, computed_at,
-        agent_reported_cost_usd, metadata, started_at_ms, ended_at_ms)
+        agent_reported_cost_usd, metadata, started_at_ms, ended_at_ms, backend_agent)
       VALUES (@id, @agent, @agent_version, @project_path, @started_at, @ended_at, @duration_sec,
         @total_fresh_input_tokens, @total_output_tokens, @total_cache_read_tokens, @total_cache_write_tokens,
         @total_cost_usd, @primary_model, @turn_count, @pricing_table_version, @computed_at,
-        @agent_reported_cost_usd, @metadata, @started_at_ms, @ended_at_ms)
+        @agent_reported_cost_usd, @metadata, @started_at_ms, @ended_at_ms, @backend_agent)
       ON CONFLICT(id) DO UPDATE SET
         agent_version=excluded.agent_version, project_path=excluded.project_path,
         ended_at=excluded.ended_at, duration_sec=excluded.duration_sec,
@@ -60,7 +94,8 @@ export class Repository {
         turn_count=excluded.turn_count, pricing_table_version=excluded.pricing_table_version,
         computed_at=excluded.computed_at, agent_reported_cost_usd=excluded.agent_reported_cost_usd,
         metadata=excluded.metadata,
-        started_at_ms=excluded.started_at_ms, ended_at_ms=excluded.ended_at_ms
+        started_at_ms=excluded.started_at_ms, ended_at_ms=excluded.ended_at_ms,
+        backend_agent=excluded.backend_agent
     `).run({
       ...s,
       // Project path is normalized on write so the prompt → session linkage
@@ -70,6 +105,7 @@ export class Repository {
       metadata: JSON.stringify(s.metadata),
       started_at_ms: startedMs,
       ended_at_ms: endedMs,
+      backend_agent: s.backend_agent ?? null,
     });
   }
 
@@ -79,10 +115,16 @@ export class Repository {
     return rowToSession(row);
   }
 
-  listSessions(opts: { limit: number; offset?: number; agent?: string }): Session[] {
-    const where = opts.agent ? `WHERE agent = ?` : '';
-    const params = opts.agent ? [opts.agent, opts.limit, opts.offset ?? 0] : [opts.limit, opts.offset ?? 0];
-    const rows = this.db.prepare(`SELECT * FROM sessions ${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`).all(...params) as any[];
+  listSessions(opts: { limit: number; offset?: number; agent?: string; backendAgent?: string }): Session[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.agent) { where.push('agent = ?'); params.push(opts.agent); }
+    if (opts.backendAgent) { where.push('backend_agent = ?'); params.push(opts.backendAgent); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    params.push(opts.limit, opts.offset ?? 0);
+    const rows = this.db.prepare(
+      `SELECT * FROM sessions ${whereSql} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+    ).all(...params) as any[];
     return rows.map(rowToSession);
   }
 
@@ -90,10 +132,10 @@ export class Repository {
     this.db.prepare(`
       INSERT INTO turns (id, session_id, sequence, timestamp, model, model_raw,
         fresh_input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-        cache_write_5m_tokens, cache_write_1h_tokens, tool_calls_count, cost_usd, metadata)
+        cache_write_5m_tokens, cache_write_1h_tokens, tool_calls_count, cost_usd, metadata, provider)
       VALUES (@id, @session_id, @sequence, @timestamp, @model, @model_raw,
         @fresh_input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens,
-        @cache_write_5m_tokens, @cache_write_1h_tokens, @tool_calls_count, @cost_usd, @metadata)
+        @cache_write_5m_tokens, @cache_write_1h_tokens, @tool_calls_count, @cost_usd, @metadata, @provider)
       ON CONFLICT(id) DO UPDATE SET
         sequence=excluded.sequence, timestamp=excluded.timestamp, model=excluded.model,
         model_raw=excluded.model_raw, fresh_input_tokens=excluded.fresh_input_tokens,
@@ -102,8 +144,8 @@ export class Repository {
         cache_write_5m_tokens=excluded.cache_write_5m_tokens,
         cache_write_1h_tokens=excluded.cache_write_1h_tokens,
         tool_calls_count=excluded.tool_calls_count, cost_usd=excluded.cost_usd,
-        metadata=excluded.metadata
-    `).run({ ...t, metadata: JSON.stringify(t.metadata) });
+        metadata=excluded.metadata, provider=excluded.provider
+    `).run({ ...t, metadata: JSON.stringify(t.metadata), provider: t.provider ?? null });
   }
 
   getTurnsForSession(sessionId: string): Turn[] {
@@ -166,23 +208,29 @@ export class Repository {
 
   // Aggregate query for /api/tools/overview. cutoffIso is the lower bound on
   // tool_calls.timestamp; pass '' (or anything sortable below all real
-  // timestamps) for "all time".
-  toolLeaderboard(cutoffIso: string, limit = 20): Array<{ name: string; calls: number; errors: number }> {
+  // timestamps) for "all time". When `filter` narrows by (agent, backend_agent),
+  // we join on sessions to evaluate the membership.
+  toolLeaderboard(cutoffIso: string, limit = 20, filter?: AgentFilter): Array<{ name: string; calls: number; errors: number }> {
+    const f = filterClause(filter, 's');
     return this.db.prepare(`
-      SELECT tool_name AS name, COUNT(*) AS calls, SUM(is_error) AS errors
-      FROM tool_calls
-      WHERE timestamp >= ?
-      GROUP BY tool_name
+      SELECT tc.tool_name AS name, COUNT(*) AS calls, SUM(tc.is_error) AS errors
+      FROM tool_calls tc
+      ${f.sql ? 'JOIN sessions s ON s.id = tc.session_id' : ''}
+      WHERE tc.timestamp >= ?${f.sql}
+      GROUP BY tc.tool_name
       ORDER BY calls DESC
       LIMIT ?
-    `).all(cutoffIso, limit) as any[];
+    `).all(cutoffIso, ...f.params, limit) as any[];
   }
 
-  toolCallsTotal(cutoffIso: string): { total: number; errors: number } {
+  toolCallsTotal(cutoffIso: string, filter?: AgentFilter): { total: number; errors: number } {
+    const f = filterClause(filter, 's');
     const row = this.db.prepare(`
-      SELECT COUNT(*) AS total, COALESCE(SUM(is_error), 0) AS errors
-      FROM tool_calls WHERE timestamp >= ?
-    `).get(cutoffIso) as any;
+      SELECT COUNT(*) AS total, COALESCE(SUM(tc.is_error), 0) AS errors
+      FROM tool_calls tc
+      ${f.sql ? 'JOIN sessions s ON s.id = tc.session_id' : ''}
+      WHERE tc.timestamp >= ?${f.sql}
+    `).get(cutoffIso, ...f.params) as any;
     return { total: row?.total ?? 0, errors: row?.errors ?? 0 };
   }
 
@@ -208,7 +256,7 @@ export class Repository {
   //
   // cutoffIso semantics match toolCallsTotal: pass '' for "all time"
   // since every real ISO timestamp sorts above the empty string.
-  aggregateTurnsByDay(cutoffIso: string): Array<{
+  aggregateTurnsByDay(cutoffIso: string, filter?: AgentFilter): Array<{
     day: string;
     model: string;
     session_id: string;
@@ -218,43 +266,106 @@ export class Repository {
     cache_read: number;
     cache_write: number;
   }> {
+    const f = filterClause(filter, 's');
     return this.db.prepare(`
       SELECT
-        substr(timestamp, 1, 10) AS day,
-        model,
-        session_id,
-        COALESCE(SUM(cost_usd), 0) AS cost,
-        COALESCE(SUM(fresh_input_tokens), 0) AS fresh_input,
-        COALESCE(SUM(output_tokens), 0) AS output,
-        COALESCE(SUM(cache_read_tokens), 0) AS cache_read,
-        COALESCE(SUM(cache_write_tokens), 0) AS cache_write
-      FROM turns
-      WHERE timestamp >= ?
-        AND session_id NOT LIKE '%/%'
-      GROUP BY day, model, session_id
+        substr(t.timestamp, 1, 10) AS day,
+        t.model,
+        t.session_id,
+        COALESCE(SUM(t.cost_usd), 0) AS cost,
+        COALESCE(SUM(t.fresh_input_tokens), 0) AS fresh_input,
+        COALESCE(SUM(t.output_tokens), 0) AS output,
+        COALESCE(SUM(t.cache_read_tokens), 0) AS cache_read,
+        COALESCE(SUM(t.cache_write_tokens), 0) AS cache_write
+      FROM turns t
+      ${f.sql ? 'JOIN sessions s ON s.id = t.session_id' : ''}
+      WHERE t.timestamp >= ?
+        AND t.session_id NOT LIKE '%/%'${f.sql}
+      GROUP BY day, t.model, t.session_id
       ORDER BY day ASC
-    `).all(cutoffIso) as any[];
+    `).all(cutoffIso, ...f.params) as any[];
   }
 
   // MCP rollup. Tool names matching the convention `mcp__<server>__<tool>`
   // are captured by the LIKE; the regex/split lives in JS so a server name
   // containing extra underscores doesn't fool the SQL.
-  mcpToolCalls(cutoffIso: string): Array<{ tool_name: string; calls: number; errors: number }> {
+  mcpToolCalls(cutoffIso: string, filter?: AgentFilter): Array<{ tool_name: string; calls: number; errors: number }> {
+    const f = filterClause(filter, 's');
     return this.db.prepare(`
-      SELECT tool_name, COUNT(*) AS calls, SUM(is_error) AS errors
-      FROM tool_calls
-      WHERE timestamp >= ? AND tool_name LIKE 'mcp\\_\\_%' ESCAPE '\\'
-      GROUP BY tool_name
+      SELECT tc.tool_name, COUNT(*) AS calls, SUM(tc.is_error) AS errors
+      FROM tool_calls tc
+      ${f.sql ? 'JOIN sessions s ON s.id = tc.session_id' : ''}
+      WHERE tc.timestamp >= ? AND tc.tool_name LIKE 'mcp\\_\\_%' ESCAPE '\\'${f.sql}
+      GROUP BY tc.tool_name
+    `).all(cutoffIso, ...f.params) as any[];
+  }
+
+  subagentCalls(cutoffIso: string, filter?: AgentFilter): Array<{ type: string; calls: number; errors: number }> {
+    const f = filterClause(filter, 's');
+    return this.db.prepare(`
+      SELECT tc.subagent_type AS type, COUNT(*) AS calls, COALESCE(SUM(tc.is_error), 0) AS errors
+      FROM tool_calls tc
+      ${f.sql ? 'JOIN sessions s ON s.id = tc.session_id' : ''}
+      WHERE tc.timestamp >= ? AND tc.subagent_type IS NOT NULL AND tc.subagent_type <> ''${f.sql}
+      GROUP BY tc.subagent_type
+      ORDER BY calls DESC
+    `).all(cutoffIso, ...f.params) as any[];
+  }
+
+  // ─── OpenClaw rollups (Slice 3) ─────────────────────────────────────────
+
+  // Rollup by sessions.backend_agent for OpenClaw sessions. cutoffIso is
+  // the lower bound on turns.timestamp; pass '' for "all time". Returns
+  // one row per named agent with sessions / tokens / cost / last_active.
+  openclawNamedAgentRollup(cutoffIso: string): Array<{
+    name: string;
+    sessions: number;
+    tokens: number;
+    cost_usd: number;
+    last_active: string | null;
+  }> {
+    return this.db.prepare(`
+      SELECT
+        s.backend_agent AS name,
+        COUNT(DISTINCT s.id) AS sessions,
+        COALESCE(SUM(t.fresh_input_tokens + t.output_tokens), 0) AS tokens,
+        COALESCE(SUM(t.cost_usd), 0) AS cost_usd,
+        MAX(t.timestamp) AS last_active
+      FROM sessions s
+      JOIN turns t ON t.session_id = s.id
+      WHERE s.agent = 'openclaw'
+        AND s.backend_agent IS NOT NULL
+        AND t.timestamp >= ?
+        AND s.id NOT LIKE '%/%'
+      GROUP BY s.backend_agent
+      ORDER BY cost_usd DESC
     `).all(cutoffIso) as any[];
   }
 
-  subagentCalls(cutoffIso: string): Array<{ type: string; calls: number; errors: number }> {
+  // Rollup by turns.provider for OpenClaw sessions. The denormalized
+  // provider column lets us GROUP BY directly instead of JSON-extracting.
+  openclawProviderRollup(cutoffIso: string): Array<{
+    provider: string;
+    models: number;
+    sessions: number;
+    tokens: number;
+    cost_usd: number;
+  }> {
     return this.db.prepare(`
-      SELECT subagent_type AS type, COUNT(*) AS calls, COALESCE(SUM(is_error), 0) AS errors
-      FROM tool_calls
-      WHERE timestamp >= ? AND subagent_type IS NOT NULL AND subagent_type <> ''
-      GROUP BY subagent_type
-      ORDER BY calls DESC
+      SELECT
+        t.provider AS provider,
+        COUNT(DISTINCT t.model) AS models,
+        COUNT(DISTINCT t.session_id) AS sessions,
+        COALESCE(SUM(t.fresh_input_tokens + t.output_tokens), 0) AS tokens,
+        COALESCE(SUM(t.cost_usd), 0) AS cost_usd
+      FROM turns t
+      JOIN sessions s ON s.id = t.session_id
+      WHERE s.agent = 'openclaw'
+        AND t.provider IS NOT NULL
+        AND t.timestamp >= ?
+        AND s.id NOT LIKE '%/%'
+      GROUP BY t.provider
+      ORDER BY cost_usd DESC
     `).all(cutoffIso) as any[];
   }
 

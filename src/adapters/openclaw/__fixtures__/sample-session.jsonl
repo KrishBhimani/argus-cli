@@ -1,0 +1,7 @@
+{"type":"session","version":3,"id":"067e3c96-b3a5-4623-8943-08a823409583","timestamp":"2026-05-08T12:30:35.057Z","cwd":"/home/coder/.openclaw/workspace"}
+{"type":"model_change","id":"73868cfc","parentId":null,"timestamp":"2026-05-08T12:30:35.059Z","provider":"kimi","modelId":"kimi-code"}
+{"type":"thinking_level_change","id":"f32d45a9","parentId":"73868cfc","timestamp":"2026-05-08T12:30:35.059Z","thinkingLevel":"low"}
+{"type":"message","id":"u1","parentId":"f32d45a9","timestamp":"2026-05-08T12:30:36.000Z","message":{"role":"user","content":[{"type":"text","text":"List the files in this folder"}]}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-05-08T12:30:37.500Z","message":{"role":"assistant","id":"asst-1","model":"kimi-code","provider":"kimi","content":[{"type":"thinking","thinking":"I'll use the read tool."},{"type":"toolCall","id":"tc-1","name":"read","arguments":{"path":"."}}],"usage":{"input":120,"output":40,"cacheRead":80,"cacheWrite":20,"cost":{"input":0.001,"output":0.002,"total":0.003}}}}
+{"type":"message","id":"tr1","parentId":"a1","timestamp":"2026-05-08T12:30:38.000Z","message":{"role":"toolResult","toolCallId":"tc-1","toolName":"read","content":[{"type":"text","text":"file1.md\nfile2.md"}],"isError":false}}
+{"type":"message","id":"a2","parentId":"tr1","timestamp":"2026-05-08T12:30:39.000Z","message":{"role":"assistant","id":"asst-2","model":"kimi-code","provider":"kimi","content":[{"type":"text","text":"Two files."}],"usage":{"input":200,"output":10,"cacheRead":120,"cacheWrite":0,"cost":0.0008}}}

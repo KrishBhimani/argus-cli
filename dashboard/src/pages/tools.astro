@@ -206,6 +206,7 @@ import Default from '../layouts/Default.astro';
     }
 
     w.addEventListener('change', refresh);
+    window.addEventListener('argus:filter-changed', refresh);
     refresh();
     window.addEventListener('resize', () => [leaderChart, mcpChart, subChart].forEach(c => c?.resize()));
   </script>

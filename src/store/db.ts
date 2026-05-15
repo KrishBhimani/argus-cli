@@ -1,11 +1,11 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { MIGRATION_001, MIGRATION_002, MIGRATION_003 } from './migrations/inline.js';
+import { MIGRATION_001, MIGRATION_002, MIGRATION_003, MIGRATION_004 } from './migrations/inline.js';
 
 export type Db = Database.Database;
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export function openDb(path: string): Db {
   mkdirSync(dirname(path), { recursive: true });
@@ -32,6 +32,10 @@ export function openDb(path: string): Db {
   if (current < 3) {
     db.exec(MIGRATION_003);
     current = 3;
+  }
+  if (current < 4) {
+    db.exec(MIGRATION_004);
+    current = 4;
   }
 
   db.prepare(`INSERT OR REPLACE INTO app_meta (key, value) VALUES ('schema_version', ?)`).run(

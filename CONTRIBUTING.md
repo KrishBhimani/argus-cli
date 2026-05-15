@@ -70,6 +70,42 @@ help debug rather than asking you to set up a Windows VM.
 - Conventional commit prefixes (`feat:`, `fix:`, `docs:`, `chore:`,
   `ci:`) for clarity. Not strictly enforced, but helpful.
 
+## Adding a new agent backend
+
+Argus is built around an `Adapter` interface so new coding-agent backends
+(e.g. Cursor, Aider, future tools) can be added without forking the
+dashboard. The steps:
+
+1. **Create `src/adapters/<name>/`** with:
+   - `index.ts` — exports `class <Name>Adapter implements Adapter`
+   - `discover.ts` — finds session files under the agent's root
+   - `schemas.ts` — zod schemas for the JSONL line shapes
+   - `ingest_file.ts` — parses one JSONL file into `AdapterIngestResult`
+   - `extract_turns.ts`, `extract_tool_calls.ts` — emit the canonical raw types
+   - `api.ts` (optional) — adapter-specific routes under `/api/agents/<name>/*`
+   - One `*.test.ts` per parser, plus an `integration.test.ts`
+2. **Map your token fields to the canonical shape:** `fresh_input`,
+   `output`, `cache_read`, `cache_write`. If your agent reports per-turn
+   cost, set `cost_usd_override` on each `RawTurnEvent` so the pipeline
+   trusts it instead of running the LiteLLM compute.
+3. **Declare `capabilities` truthfully:** `reportsNativeCost`,
+   `hasToolCalls`, `hasTranscriptSegments`, `hasPrompts`. Pipeline and API
+   behavior derives from these — no `if agent === 'foo'` checks.
+4. **Register in `src/adapters/registry.ts`:** add one line to
+   `loadAdapters()` returning your adapter when the root path exists.
+5. **(Optional) Create a dedicated page** at
+   `dashboard/src/pages/agents/<name>.astro` if your backend has data the
+   shared pages can't surface. The page URL is advertised via the
+   `/api/agents` manifest's `page_path`.
+6. **Update [API.md](./API.md)** if you added new endpoints.
+7. **Tests pass:** `npm test`. No changes needed to `repository.ts`,
+   the migration list, or shared pages unless your data introduces a
+   genuinely new dimension.
+
+The OpenClaw adapter at `src/adapters/openclaw/` is a recent worked example
+covering all of the above (archive-file rules, native cost handling,
+named-agent subdivision, per-agent endpoints, dedicated page).
+
 ## Areas to be careful
 
 A few corners of the codebase have hidden complexity. If you're

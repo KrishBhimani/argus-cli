@@ -1,15 +1,9 @@
 import type { AssistantLine, UserLine } from './schemas.js';
-import type { SegmentRole } from '../../schema/types.js';
+import type { SegmentRole, RawSegment } from '../../schema/types.js';
 
-// Output of transcript extraction. session_id is stamped by the pipeline
-// when persisting; uid here is the (line_uuid, block_index) suffix that
-// gets prefixed to make a globally-unique uid.
-export interface RawSegment {
-  uid_suffix: string;     // "{line_uuid}:{block_index}"
-  timestamp: string;      // ISO timestamp from the source line
-  role: SegmentRole;
-  text: string;
-}
+// Re-export so existing imports from this module keep working. New code
+// should import RawSegment directly from schema/types.js.
+export type { RawSegment };
 
 // Per-segment cap. Most assistant text fits well under 16 KB; tool_result
 // content can be much larger (a `Read` of a file, a `Bash` of a build

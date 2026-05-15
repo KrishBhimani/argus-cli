@@ -16,6 +16,7 @@ import Default from '../../layouts/Default.astro';
         <tr>
           <th data-sort="started_at" class="sorted">Started</th>
           <th data-sort="project_path">Project</th>
+          <th data-sort="agent" class="agent-col">Backend</th>
           <th data-sort="primary_model">Model</th>
           <th data-sort="duration_sec" class="num">Duration</th>
           <th data-sort="turn_count" class="num">Turns</th>
@@ -30,10 +31,12 @@ import Default from '../../layouts/Default.astro';
   <script>
     import { api, type Session } from '../../scripts/api';
     import { usd, tok, num, shortDate, shortPath, dur, escapeHtml } from '../../scripts/format';
+    import { getFilter, loadAgents } from '../../scripts/agents';
 
     let all: Session[] = [];
     let sortKey = 'started_at';
     let sortDesc = true;
+    let agentLabels: Record<string, string> = {};
 
     const $ = (s: string) => document.querySelector(s) as HTMLElement;
     const tbody = $('#t tbody');
@@ -41,6 +44,19 @@ import Default from '../../layouts/Default.astro';
     const count = $('#count');
 
     function tokens(s: Session) { return s.total_fresh_input_tokens + s.total_output_tokens + s.total_cache_read_tokens + s.total_cache_write_tokens; }
+
+    // Backend-column visibility rule from the spec (§8.6):
+    //   filter=All                          → show (mixed data)
+    //   filter=backend with named agents    → show (e.g. openclaw)
+    //   filter=backend without named agents → hide (claude_code — column would be all null)
+    //   filter=specific named agent         → hide (redundant)
+    function shouldShowBackendColumn(rows: Session[], filter: { agent?: string; backendAgent?: string }): boolean {
+      if (filter.backendAgent) return false;
+      if (!filter.agent) return true;  // All
+      // Show when this backend has at least one row with a non-null backend_agent
+      // (i.e. the named-agent dimension is meaningful for it).
+      return rows.some(s => s.agent === filter.agent && s.backend_agent != null);
+    }
 
     function render() {
       const q = search.value.toLowerCase();
@@ -54,17 +70,28 @@ import Default from '../../layouts/Default.astro';
         return sortDesc ? -cmp : cmp;
       });
       count.textContent = `${rows.length} of ${all.length} sessions`;
-      tbody.innerHTML = rows.map(s => `
+
+      const filter = getFilter();
+      const showBackend = shouldShowBackendColumn(all, filter);
+      const agentCol = document.querySelector('.agent-col') as HTMLElement | null;
+      if (agentCol) agentCol.style.display = showBackend ? '' : 'none';
+
+      tbody.innerHTML = rows.map(s => {
+        const backendCell = showBackend
+          ? `<td>${escapeHtml(agentLabels[s.agent] ?? s.agent)}${s.backend_agent ? ` <span class="muted">/ ${escapeHtml(s.backend_agent)}</span>` : ''}</td>`
+          : '<td style="display:none;"></td>';
+        return `
         <tr data-id="${encodeURIComponent(s.id)}">
           <td>${shortDate(s.started_at)}</td>
           <td class="mono">${escapeHtml(shortPath(s.project_path, 50))}</td>
+          ${backendCell}
           <td><code>${escapeHtml(s.primary_model)}</code></td>
           <td class="num">${dur(s.duration_sec)}</td>
           <td class="num">${num(s.turn_count)}</td>
           <td class="num tok">${tok(tokens(s))}</td>
           <td class="num cost">~${usd(s.total_cost_usd)}</td>
-        </tr>
-      `).join('') || '<tr><td colspan="7" class="empty">No sessions match.</td></tr>';
+        </tr>`;
+      }).join('') || `<tr><td colspan="8" class="empty">No sessions match.</td></tr>`;
       tbody.querySelectorAll('tr[data-id]').forEach(tr => {
         tr.addEventListener('click', () => location.href = '/session?id=' + (tr as HTMLElement).dataset.id);
       });
@@ -82,6 +109,16 @@ import Default from '../../layouts/Default.astro';
     });
     search.addEventListener('input', render);
 
-    api.sessions('?limit=10000').then(({ sessions }) => { all = sessions; render(); });
+    async function refresh() {
+      const [resp, agents] = await Promise.all([
+        api.sessions('?limit=10000'),
+        loadAgents().catch(() => []),
+      ]);
+      agentLabels = Object.fromEntries(agents.map(a => [a.name, a.display_name]));
+      all = resp.sessions;
+      render();
+    }
+    refresh();
+    window.addEventListener('argus:filter-changed', refresh);
   </script>
 </Default>

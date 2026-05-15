@@ -1,6 +1,8 @@
+import { withFilter } from './agents.js';
+
 export interface Session {
   id: string;
-  agent: 'claude_code' | 'codex';
+  agent: string;
   agent_version: string | null;
   project_path: string;
   started_at: string;
@@ -17,6 +19,7 @@ export interface Session {
   computed_at: string;
   agent_reported_cost_usd: number | null;
   metadata: Record<string, unknown>;
+  backend_agent: string | null;
 }
 
 export interface Turn {
@@ -63,13 +66,13 @@ export interface PromptHit {
 }
 
 export const api = {
-  sessions: (q = '') => fetch('/api/sessions' + q).then(r => r.json() as Promise<{ sessions: Session[] }>),
+  sessions: (q = '') => fetch(withFilter('/api/sessions' + q)).then(r => r.json() as Promise<{ sessions: Session[]; applied_filter?: { agent: string | null; backend_agent: string | null } }>),
   session: (id: string) => fetch('/api/sessions/' + encodeURIComponent(id)).then(r => r.ok ? r.json() as Promise<{ session: Session; turns: Turn[] }> : null),
-  overview: (window: string) => fetch('/api/overview?window=' + window).then(r => r.json() as Promise<Overview>),
-  trends: (granularity: string, groupBy: string) => fetch(`/api/trends?granularity=${granularity}&groupBy=${groupBy}`).then(r => r.json() as Promise<{ points: { bucket: string; groups: Record<string, { cost: number; tokens: number; sessions: number }> }[] }>),
+  overview: (window: string) => fetch(withFilter('/api/overview?window=' + window)).then(r => r.json() as Promise<Overview>),
+  trends: (granularity: string, groupBy: string) => fetch(withFilter(`/api/trends?granularity=${granularity}&groupBy=${groupBy}`)).then(r => r.json() as Promise<{ points: { bucket: string; groups: Record<string, { cost: number; tokens: number; sessions: number }> }[] }>),
   pricing: () => fetch('/api/pricing').then(r => r.json() as Promise<{ version: string }>),
   parseErrors: () => fetch('/api/parse-errors').then(r => r.json() as Promise<{ errors: { file: string; reason: string; raw_line_truncated: string }[] }>),
-  toolsOverview: (window: string) => fetch('/api/tools/overview?window=' + window).then(r => r.json() as Promise<ToolsOverview>),
+  toolsOverview: (window: string) => fetch(withFilter('/api/tools/overview?window=' + window)).then(r => r.json() as Promise<ToolsOverview>),
   prompts: (params: { q?: string; limit?: number; project?: string; includeSlash?: boolean }) => {
     const sp = new URLSearchParams();
     if (params.q) sp.set('q', params.q);

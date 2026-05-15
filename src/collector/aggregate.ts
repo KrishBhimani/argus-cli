@@ -4,6 +4,12 @@ import type { PricingTable } from '../pricing/types.js';
 import { computeTurnCost } from '../pricing/compute.js';
 
 export function buildTurn(raw: RawTurnEvent, sessionId: string, table: PricingTable): Turn {
+  // Adapters that emit native cost (OpenClaw via usage.cost.total) bypass
+  // the LiteLLM pricing-table compute. Adapters that don't (Claude Code)
+  // leave the override unset, so the pricing-table calculation applies.
+  const cost = raw.cost_usd_override !== undefined && raw.cost_usd_override !== null
+    ? raw.cost_usd_override
+    : computeTurnCost(raw, table);
   return {
     id: `${sessionId}:${raw.native_turn_id}`,
     session_id: sessionId,
@@ -18,8 +24,9 @@ export function buildTurn(raw: RawTurnEvent, sessionId: string, table: PricingTa
     cache_write_5m_tokens: raw.cache_write_5m_tokens,
     cache_write_1h_tokens: raw.cache_write_1h_tokens,
     tool_calls_count: raw.tool_calls_count,
-    cost_usd: computeTurnCost(raw, table),
+    cost_usd: cost,
     metadata: raw.metadata,
+    provider: raw.provider ?? null,
   };
 }
 
@@ -56,10 +63,11 @@ export function buildSession(header: RawSessionHeader, sessionId: string, allTur
     total_cost_usd: totals.cost,
     primary_model: primary,
     turn_count: allTurns.length,
-    pricing_table_version: pricingVersion,
+    pricing_table_version: header.pricing_table_version_override ?? pricingVersion,
     computed_at: computedAt,
     agent_reported_cost_usd: header.agent_reported_cost_usd,
     metadata: header.metadata,
+    backend_agent: header.backend_agent ?? null,
   };
 }
 

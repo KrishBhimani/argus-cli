@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Repository } from '../store/repository.js';
+import type { AgentFilter } from '../store/repository.js';
 import type { IngestStatus } from '../collector/first_run.js';
 import type { Adapter } from '../adapters/adapter.js';
 import type { PricingTable } from '../pricing/types.js';
@@ -8,8 +9,23 @@ import { runSegmentBackfill, getSearchBackfillStatus } from '../collector/search
 export interface ApiDeps {
   pricingTableVersion: string;
   ingestStatus: () => IngestStatus;
-  adapters: Adapter[];
-  pricingTable: PricingTable;
+  // Adapters used for the search-index backfill, agent manifest, and per-agent
+  // route registration. Optional so unit tests can build a minimal app.
+  adapters?: Adapter[];
+  pricingTable?: PricingTable;
+}
+
+// Read the two-axis filter from query params. Each response echoes back
+// `applied_filter` so any UI can label what it's rendering without consulting
+// separate state — that's the API-as-contract principle.
+function readFilter(c: { req: { query: (k: string) => string | undefined } }): AgentFilter {
+  const agent = c.req.query('agent') || undefined;
+  const backendAgent = c.req.query('backend_agent') || undefined;
+  return { agent, backendAgent };
+}
+
+function appliedFilter(f: AgentFilter): { agent: string | null; backend_agent: string | null } {
+  return { agent: f.agent ?? null, backend_agent: f.backendAgent ?? null };
 }
 
 const WINDOWS: Record<string, number | null> = { 'today': 1, '7d': 7, '30d': 30, 'all': null };
@@ -95,10 +111,12 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
   app.get('/api/sessions', (c) => {
     const limit = Number(c.req.query('limit') ?? 100);
     const offset = Number(c.req.query('offset') ?? 0);
-    const agent = c.req.query('agent') ?? undefined;
+    const filter = readFilter(c);
     const includeSub = c.req.query('includeSub') === 'true';
-    const sessions = repo.listSessions({ limit, offset, agent }).filter(s => (includeSub || isTopLevel(s.id)) && isMeaningful(s));
-    return c.json({ sessions });
+    const sessions = repo
+      .listSessions({ limit, offset, agent: filter.agent, backendAgent: filter.backendAgent })
+      .filter(s => (includeSub || isTopLevel(s.id)) && isMeaningful(s));
+    return c.json({ sessions, applied_filter: appliedFilter(filter) });
   });
 
   app.get('/api/sessions/:id', (c) => {
@@ -111,13 +129,14 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
 
   app.get('/api/overview', (c) => {
     const window = c.req.query('window') ?? '7d';
+    const filter = readFilter(c);
     const cutoff = cutoffIsoForWindow(window);
 
     // Turn-level aggregation. See repository.aggregateTurnsByDay for why
     // session-level filtering by started_at was wrong (sessions that started
     // before the window but had turns inside it were dropped entirely; the
     // heatmap dumped each session's lifetime cost on its start day).
-    const rows = repo.aggregateTurnsByDay(cutoff);
+    const rows = repo.aggregateTurnsByDay(cutoff, filter);
 
     // Full session metadata lookup, indexed by id. Used for the agent split,
     // the top-sessions table, etc. — one pass instead of N getSession calls.
@@ -193,32 +212,42 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
       session_count: activeSessions.size, agent_split: split, cost_by_day: byDay,
       cost_by_model: costByModel,
       top_sessions: topSessions,
+      applied_filter: appliedFilter(filter),
     });
   });
 
   app.get('/api/trends', (c) => {
     const granularity = (c.req.query('granularity') ?? 'day') as 'day' | 'week' | 'month';
-    const groupBy = (c.req.query('groupBy') ?? 'agent') as 'agent' | 'model';
+    const groupBy = (c.req.query('groupBy') ?? 'agent') as 'agent' | 'model' | 'backend_agent';
+    const filter = readFilter(c);
 
     // Same root cause + same fix as /api/overview: aggregate from turns by
     // their own timestamp, not from session lifetime totals keyed on
     // session.started_at. A session that started in month N-1 but had turns
     // in month N should appear in N's bucket — the session-based version
     // silently dropped it.
-    const rows = repo.aggregateTurnsByDay(''); // '' = all time
+    const rows = repo.aggregateTurnsByDay('', filter);
     const sessionAgent = new Map<string, string>();
+    const sessionBackendAgent = new Map<string, string | null>();
     for (const s of repo.listSessions({ limit: 100_000 })) {
       sessionAgent.set(s.id, s.agent);
+      sessionBackendAgent.set(s.id, s.backend_agent ?? null);
     }
 
     const rebucket = (day: string) => granularity === 'day' ? day
       : granularity === 'week' ? `${day.slice(0, 4)}-W${weekOf(day)}`
       : day.slice(0, 7);
 
+    const groupKey = (sessionId: string, model: string): string => {
+      if (groupBy === 'agent') return sessionAgent.get(sessionId) ?? 'unknown';
+      if (groupBy === 'backend_agent') return sessionBackendAgent.get(sessionId) ?? 'none';
+      return model;
+    };
+
     const points: Record<string, Record<string, { cost: number; tokens: number; sessions: number; _sessionSet?: Set<string> }>> = {};
     for (const r of rows) {
       const b = rebucket(r.day);
-      const k = groupBy === 'agent' ? (sessionAgent.get(r.session_id) ?? 'unknown') : r.model;
+      const k = groupKey(r.session_id, r.model);
       points[b] ??= {};
       points[b][k] ??= { cost: 0, tokens: 0, sessions: 0, _sessionSet: new Set<string>() };
       points[b][k].cost += r.cost;
@@ -237,17 +266,22 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
         delete groups[k]._sessionSet;
       }
     }
-    return c.json({ granularity, groupBy, points: Object.entries(points).sort().map(([bucket, groups]) => ({ bucket, groups })) });
+    return c.json({
+      granularity, groupBy,
+      points: Object.entries(points).sort().map(([bucket, groups]) => ({ bucket, groups })),
+      applied_filter: appliedFilter(filter),
+    });
   });
 
   // ─── Slice 1: Tools ────────────────────────────────────────────────────
 
   app.get('/api/tools/overview', (c) => {
     const window = c.req.query('window') ?? '7d';
+    const filter = readFilter(c);
     const cutoff = cutoffIsoForWindow(window);
 
-    const totals = repo.toolCallsTotal(cutoff);
-    const leaderboardRaw = repo.toolLeaderboard(cutoff, 20);
+    const totals = repo.toolCallsTotal(cutoff, filter);
+    const leaderboardRaw = repo.toolLeaderboard(cutoff, 20, filter);
     const leaderboard = leaderboardRaw.map(r => ({
       name: r.name,
       calls: r.calls,
@@ -255,7 +289,7 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
       error_rate: r.calls > 0 ? Math.round(((r.errors ?? 0) / r.calls) * 100) / 100 : 0,
     }));
 
-    const mcpRows = repo.mcpToolCalls(cutoff);
+    const mcpRows = repo.mcpToolCalls(cutoff, filter);
     const mcpAgg = new Map<string, { calls: number; errors: number; tools: Set<string> }>();
     for (const row of mcpRows) {
       const server = mcpServerName(row.tool_name);
@@ -270,7 +304,7 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
       .map(([server, v]) => ({ server, calls: v.calls, errors: v.errors, tools_used: v.tools.size }))
       .sort((a, b) => b.calls - a.calls);
 
-    const subagents = repo.subagentCalls(cutoff).map(r => ({
+    const subagents = repo.subagentCalls(cutoff, filter).map(r => ({
       type: r.type,
       calls: r.calls,
       errors: r.errors ?? 0,
@@ -283,6 +317,7 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
       tool_leaderboard: leaderboard,
       mcp_servers,
       subagents,
+      applied_filter: appliedFilter(filter),
     });
   });
 
@@ -511,8 +546,12 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
   app.post('/api/search-index/enable', async (c) => {
     repo.setSearchIndexingEnabled(true);
     // Fire-and-forget; runSegmentBackfill is internally async and
-    // updates a process-local progress object that /status reads.
-    runSegmentBackfill(deps.adapters, repo, deps.pricingTable).catch(() => { /* logged via parse_errors */ });
+    // updates a process-local progress object that /status reads. The
+    // backfill only runs when adapters + pricing table are wired; unit-test
+    // builds without them just set the flag.
+    if (deps.adapters && deps.pricingTable) {
+      runSegmentBackfill(deps.adapters, repo, deps.pricingTable).catch(() => { /* logged via parse_errors */ });
+    }
     return c.json({ enabled: true, backfill: getSearchBackfillStatus() });
   });
 
@@ -560,18 +599,75 @@ export function buildApi(repo: Repository, deps: ApiDeps) {
   app.get('/api/pricing', (c) => c.json({ version: deps.pricingTableVersion }));
 
   app.get('/api/export.json', (c) => {
-    const sessions = repo.listSessions({ limit: 1_000_000 }).filter(s => isTopLevel(s.id) && isMeaningful(s));
-    return c.json({ sessions });
+    const filter = readFilter(c);
+    const sessions = repo
+      .listSessions({ limit: 1_000_000, agent: filter.agent, backendAgent: filter.backendAgent })
+      .filter(s => isTopLevel(s.id) && isMeaningful(s));
+    return c.json({ sessions, applied_filter: appliedFilter(filter) });
   });
 
   app.get('/api/export.csv', (c) => {
-    const rows = repo.listSessions({ limit: 1_000_000 }).filter(s => isTopLevel(s.id) && isMeaningful(s));
-    const header = 'id,agent,started_at,ended_at,project_path,primary_model,total_cost_usd,total_fresh_input_tokens,total_output_tokens,turn_count\n';
-    const body = rows.map(s => [s.id, s.agent, s.started_at, s.ended_at ?? '', s.project_path, s.primary_model, s.total_cost_usd, s.total_fresh_input_tokens, s.total_output_tokens, s.turn_count].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const filter = readFilter(c);
+    const rows = repo
+      .listSessions({ limit: 1_000_000, agent: filter.agent, backendAgent: filter.backendAgent })
+      .filter(s => isTopLevel(s.id) && isMeaningful(s));
+    const header = 'id,agent,backend_agent,started_at,ended_at,project_path,primary_model,total_cost_usd,total_fresh_input_tokens,total_output_tokens,turn_count\n';
+    const body = rows.map(s => [s.id, s.agent, s.backend_agent ?? '', s.started_at, s.ended_at ?? '', s.project_path, s.primary_model, s.total_cost_usd, s.total_fresh_input_tokens, s.total_output_tokens, s.turn_count].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     return c.body(header + body, 200, { 'content-type': 'text/csv' });
   });
 
   app.get('/api/parse-errors', (c) => c.json({ errors: repo.recentParseErrors(100) }));
+
+  // ─── Slice 3: agent manifest + per-agent route registration ────────────
+
+  // /api/agents — the manifest. Drives the dashboard nav dropdown, the
+  // global filter picker, and any custom UI's discovery of available
+  // backends. Capabilities, display label, page path, and named-agent
+  // list all flow from here. No agent name is ever hardcoded in the UI.
+  app.get('/api/agents', async (c) => {
+    const adapters = deps.adapters ?? [];
+    const entries = await Promise.all(adapters.map(async a => {
+      const backendAgents = a.listBackendAgents ? await a.listBackendAgents() : null;
+      return {
+        name: a.agent,
+        display_name: a.displayName,
+        capabilities: a.capabilities,
+        backend_agents: backendAgents,
+        page_path: `/agents/${a.agent.replace(/_/g, '-')}`,
+      };
+    }));
+    return c.json({ agents: entries });
+  });
+
+  // Claude Code's per-agent endpoint: sub-agent (Task tool) delegations.
+  // Lives in the adapter folder via registerRoutes below — this is the
+  // fallback for the Claude Code adapter, which doesn't ship its own
+  // registerRoutes yet. Wired here so it's available even when adapters[]
+  // is empty in unit tests.
+  app.get('/api/agents/claude-code/sub-agents', (c) => {
+    const window = c.req.query('window') ?? '7d';
+    const cutoff = cutoffIsoForWindow(window);
+    const filter: AgentFilter = { agent: 'claude_code' };
+    const rows = repo.subagentCalls(cutoff, filter);
+    return c.json({
+      window,
+      sub_agents: rows.map(r => ({
+        type: r.type,
+        invocations: r.calls,
+        errors: r.errors,
+        error_rate: r.calls > 0 ? Math.round((r.errors / r.calls) * 100) / 100 : 0,
+      })),
+    });
+  });
+
+  // Each adapter contributes its own /api/agents/<name>/* routes via the
+  // optional registerRoutes hook. Keeps per-agent code in the adapter
+  // folder rather than scattered through src/server/.
+  for (const adapter of deps.adapters ?? []) {
+    if (adapter.registerRoutes) {
+      adapter.registerRoutes(app, repo);
+    }
+  }
 
   return app;
 }

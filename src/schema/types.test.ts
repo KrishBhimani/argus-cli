@@ -22,6 +22,7 @@ describe('schema types', () => {
       computed_at: '2026-05-02T00:00:00Z',
       agent_reported_cost_usd: null,
       metadata: {},
+      backend_agent: null,
     };
     expectTypeOf(s.agent).toEqualTypeOf<AgentName>();
   });

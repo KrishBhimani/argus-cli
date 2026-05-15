@@ -24,13 +24,16 @@ security fixes. Pinning to an older 0.x is at your own risk.
 Argus is built for one user, one machine. It assumes:
 
 - **Trusted local environment.** Anyone with shell access to your
-  account can already read `~/.claude/`, so Argus reading the same
-  files isn't an additional privilege.
+  account can already read `~/.claude/` and `~/.openclaw/`, so Argus
+  reading the same files isn't an additional privilege.
 - **Untrusted JSONL contents.** Session logs are produced by Claude
-  Code, but their contents (model names, project paths, transcript
-  text, tool inputs) are user-controlled. Argus treats them as
-  untrusted input — they're parsed with `zod` schemas, escaped before
-  rendering in the dashboard, and never executed.
+  Code, OpenClaw, and any other supported agent, but their contents
+  (model names, project paths, transcript text, tool inputs) are
+  user-controlled. Argus treats them as untrusted input — they're
+  parsed with `zod` schemas, escaped before rendering in the dashboard,
+  and never executed. Each adapter applies the same symlink-rejection
+  rule (`realpath` containment check) on every candidate file before
+  reading.
 - **Untrusted browsers visiting localhost.** Other webpages the user
   loads while Argus is running are not trusted. They cannot read
   Argus data (Same-Origin Policy on responses) and cannot trigger

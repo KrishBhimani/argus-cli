@@ -115,6 +115,7 @@ import Default from '../layouts/Default.astro';
     }
 
     sel.addEventListener('change', refresh);
+    window.addEventListener('argus:filter-changed', refresh);
     refresh();
     window.addEventListener('resize', () => [lineChart, heatChart, modelsChart].forEach(c => c?.resize()));
   </script>

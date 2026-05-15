@@ -48,8 +48,15 @@ export const shortPath = (p: string, n = 40) => {
   return '…/' + tail;
 };
 
-// Kept for backward compat with any pages still importing it; only Claude Code is supported now.
-export const agentTag = (_a: string) => `<span class="tag tag-claude">Claude</span>`;
+// Renders a tag for any agent backend. Display labels flow from the
+// /api/agents manifest (loadAgents() in scripts/agents.ts) — pages that
+// have access to the manifest should pass the resolved display_name in.
+// Without context, we fall back to a CSS-safe slug of the raw agent id.
+export const agentTag = (a: string, displayLabel?: string) => {
+  const label = displayLabel ?? a;
+  const slug = String(a).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `<span class="tag tag-${slug}">${label}</span>`;
+};
 
 // Escape every HTML-special character so a string can be safely inserted
 // via innerHTML. ALWAYS use this for any value sourced from JSONL files

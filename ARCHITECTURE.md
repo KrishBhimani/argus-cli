@@ -2,23 +2,26 @@
 
 A guide to how the pieces fit together, aimed at anyone about to change
 the code. Read this before adding a feature so you know where things
-live and why. README.md is the user-facing intro; this is the
-contributor's map.
+live and why. README.md is the user-facing intro;
+[API.md](./API.md) is the HTTP API contract; this is the contributor's map.
 
 ## The 30-second mental model
 
-Claude Code writes a `.jsonl` file every time you use it, one file per
-session, at `~/.claude/projects/<project>/<session-id>.jsonl`. Each
-line is one event: a user message, an assistant reply, a tool call, or
-a tool result.
+Coding agents (Claude Code, OpenClaw, …) write `.jsonl` files as they
+run, one per session. The location and exact shape differ per agent, so
+Argus has one **adapter** per backend that knows how to find files,
+parse them, and emit a normalized shape (`sessions`, `turns`,
+`tool_calls`) into SQLite.
 
 Argus is two things:
 
-1. A **watcher** that reads those files as they grow, validates each
-   line, and stores it in a local SQLite database at
-   `~/.argus/argus.db`.
-2. A **local web server** that queries SQLite and serves a static
-   dashboard at `http://localhost:4242`.
+1. A **watcher** that registers every available adapter, watches their
+   roots in one chokidar instance, and writes normalized rows to a local
+   SQLite database at `~/.argus/argus.db`.
+2. A **local web server** that queries SQLite and serves an HTTP API
+   (documented in `API.md`) plus a static dashboard at
+   `http://localhost:4242`. **The dashboard is one reference UI** — the
+   API is the canonical contract; build your own UI freely.
 
 No network calls (except optional `argus pricing refresh`). No
 telemetry. No LLM calls. Everything stays on your machine.
@@ -30,20 +33,25 @@ SQLite in WAL mode. Two tables you'll touch most often:
 ### `sessions`
 One row per session. **Pre-summed totals** for fast listing:
 
-- `id` (e.g. `claude_code:abc123…`), `agent`, `project_path`
+- `id` (e.g. `claude_code:abc123…` or `openclaw:main:def456…`), `agent`,
+  `backend_agent` (OpenClaw's named-agent subdivision), `project_path`
 - `started_at`, `ended_at`, `duration_sec`
 - `total_*_tokens` (fresh_input, output, cache_read, cache_write)
 - `total_cost_usd`, `primary_model`, `turn_count`
+- `pricing_table_version` — usually a LiteLLM version string, but
+  `'openclaw-reported'` for OpenClaw sessions (cost is provider-billed,
+  not computed)
 
 Use for: the Sessions table, "Top sessions in window" lists, anything
 that needs a whole-session view.
 
 ### `turns`
-One row per back-and-forth with Claude — **the source of truth** for
+One row per back-and-forth with the agent — **the source of truth** for
 everything else.
 
 - `id`, `session_id`, `sequence`, `timestamp`
-- `model`, `model_raw`
+- `model`, `model_raw`, `provider` (kimi / anthropic / openai — NULL for
+  Claude Code, which is always Anthropic)
 - Per-turn token counts (fresh_input, output, cache_read,
   cache_write_5m, cache_write_1h)
 - `tool_calls_count`, `cost_usd`, `metadata`
@@ -196,8 +204,10 @@ pricing/                    bundled LiteLLM price tables (shipped)
 | Want to… | Touch these |
 |---|---|
 | Add a new dashboard page | `dashboard/src/pages/<name>.astro`, add nav link in `dashboard/src/layouts/Default.astro` |
-| Add a new API endpoint | `src/server/api.ts`, add a `repo.<methodName>()` in `src/store/repository.ts` |
+| Add a new API endpoint | `src/server/api.ts`, add a `repo.<methodName>()` in `src/store/repository.ts`, document in `API.md` |
 | Add a new SQL table or column | New `MIGRATION_N+1` in `src/store/migrations/inline.ts`, bump schema check in `db.ts`, add `repo` method, add type in `src/schema/types.ts` |
-| Parse a new JSONL field | `src/adapters/claude_code/schemas.ts` (zod), wire into `pipeline.ts` |
+| Add a new agent backend (e.g. Cursor, Aider, Codex) | New folder `src/adapters/<name>/` (parsers + tests), register in `src/adapters/registry.ts`, optionally add a `dashboard/src/pages/agents/<name>.astro` for a dedicated page. See [CONTRIBUTING.md](./CONTRIBUTING.md). |
+| Parse a new JSONL field for an existing agent | The adapter's `schemas.ts` + `extract_*.ts` |
 | Tweak cost computation | `src/pricing/compute.ts`, then re-ingest to recompute via a backfill |
 | Add a new chart | `dashboard/src/scripts/charts.ts` (theme is shared) |
+| Add per-agent routes | Implement `registerRoutes()` on your adapter; routes live under `/api/agents/<name>/*`. |

@@ -1,9 +1,16 @@
-import type { Adapter } from '../adapter.js';
+import type { Adapter, AdapterCapabilities } from '../adapter.js';
 import { discoverSessionFiles } from './discover.js';
 import { ingestClaudeCodeFile } from './ingest_file.js';
 
 export class ClaudeCodeAdapter implements Adapter {
-  readonly agent = 'claude_code' as const;
+  readonly agent = 'claude_code';
+  readonly displayName = 'Claude Code';
+  readonly capabilities: AdapterCapabilities = {
+    reportsNativeCost: false,
+    hasToolCalls: true,
+    hasTranscriptSegments: true,
+    hasPrompts: true,
+  };
   constructor(private readonly root: string) {}
   rootPath() { return this.root; }
   // Only top-level session files. Sub-agent files (<sid>/subagents/*.jsonl)

@@ -1,18 +1,9 @@
 import type { AssistantLine, UserLine } from './schemas.js';
+import type { RawToolCall } from '../../schema/types.js';
 
-// Output shape — adapter-local, not the persisted ToolCall (the pipeline
-// stamps session_id and composite id when it inserts).
-export interface RawToolCall {
-  native_turn_id: string;  // assistant message.id this tool_use belongs to
-  turn_index: number;      // 0-based sequence of the parent assistant turn
-  block_index: number;     // 0-based index within the assistant content[]
-  tool_name: string;
-  tool_use_id: string;     // matches a later user message's tool_result.tool_use_id
-  is_error: 0 | 1;
-  input_size: number;      // JSON.stringify(input).length
-  subagent_type: string | null;  // populated only when tool_name === 'Task'
-  timestamp: string;       // ISO from the assistant line that produced the block
-}
+// Re-export so existing imports from this module keep working. New code
+// should import RawToolCall directly from schema/types.js.
+export type { RawToolCall };
 
 // Walks a session's assistant + user lines and emits one RawToolCall per
 // tool_use block found in any assistant message.

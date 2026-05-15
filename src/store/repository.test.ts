@@ -25,6 +25,7 @@ const SESSION: Session = {
   computed_at: '2026-05-02T00:00:00Z',
   agent_reported_cost_usd: null,
   metadata: { foo: 'bar' },
+  backend_agent: null,
 };
 
 const TURN: Turn = {
@@ -43,6 +44,7 @@ const TURN: Turn = {
   tool_calls_count: 1,
   cost_usd: 0.75,
   metadata: {},
+  provider: null,
 };
 
 describe('Repository', () => {

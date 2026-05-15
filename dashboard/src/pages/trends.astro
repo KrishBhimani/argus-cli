@@ -49,6 +49,7 @@ import Default from '../layouts/Default.astro';
     }
     $('#g').addEventListener('change', refresh);
     $('#b').addEventListener('change', refresh);
+    window.addEventListener('argus:filter-changed', refresh);
     refresh();
     window.addEventListener('resize', () => chart?.resize());
   </script>

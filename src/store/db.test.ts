@@ -32,4 +32,25 @@ describe('openDb', () => {
     openDb(path).close();
     expect(() => openDb(path).close()).not.toThrow();
   });
+
+  it('migration 004 adds backend_agent on sessions', () => {
+    const db = openDb(join(dir, 'argus.db'));
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
+    expect(cols.map(c => c.name)).toContain('backend_agent');
+    db.close();
+  });
+
+  it('migration 004 adds provider on turns', () => {
+    const db = openDb(join(dir, 'argus.db'));
+    const cols = db.prepare(`PRAGMA table_info(turns)`).all() as { name: string }[];
+    expect(cols.map(c => c.name)).toContain('provider');
+    db.close();
+  });
+
+  it('migration 004 bumps schema_version to 4', () => {
+    const db = openDb(join(dir, 'argus.db'));
+    const row = db.prepare(`SELECT value FROM app_meta WHERE key='schema_version'`).get() as { value: string };
+    expect(row.value).toBe('4');
+    db.close();
+  });
 });

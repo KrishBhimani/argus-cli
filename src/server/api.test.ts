@@ -193,4 +193,66 @@ describe('API', () => {
     const r = await app.request('/api/parse-errors');
     expect(Array.isArray((await r.json()).errors)).toBe(true);
   });
+
+  // ─── Slice 3: multi-agent filter + manifest ───────────────────────────
+
+  it('GET /api/agents returns the registered adapters', async () => {
+    // Build an app with an explicit adapters list. We don't need the
+    // real adapters — a minimal mock with the required surface is enough
+    // for the manifest endpoint.
+    const fakeAdapters = [
+      { agent: 'claude_code', displayName: 'Claude Code',
+        capabilities: { reportsNativeCost: false, hasToolCalls: true, hasTranscriptSegments: true, hasPrompts: true },
+        rootPath: () => '/', discoverSessionFiles: async () => [], ingestFile: async () => ({ result: {} as any, new_offset: 0 }) },
+      { agent: 'openclaw', displayName: 'OpenClaw',
+        capabilities: { reportsNativeCost: true, hasToolCalls: true, hasTranscriptSegments: false, hasPrompts: false },
+        rootPath: () => '/', discoverSessionFiles: async () => [], ingestFile: async () => ({ result: {} as any, new_offset: 0 }),
+        listBackendAgents: async () => ['admin', 'dev'] },
+    ];
+    const status: () => IngestStatus = () => ({ foregroundComplete: true, pending: 0, processed: 0, total: 0 });
+    const a = buildApi(repo, { pricingTableVersion: '2026-05-02', ingestStatus: status, adapters: fakeAdapters as any });
+    const r = await a.request('/api/agents');
+    const body = await r.json();
+    expect(body.agents).toHaveLength(2);
+    expect(body.agents[0]).toMatchObject({
+      name: 'claude_code', display_name: 'Claude Code',
+      backend_agents: null, page_path: '/agents/claude-code',
+    });
+    expect(body.agents[1]).toMatchObject({
+      name: 'openclaw', display_name: 'OpenClaw',
+      backend_agents: ['admin', 'dev'], page_path: '/agents/openclaw',
+    });
+  });
+
+  it('GET /api/sessions narrows by ?agent=openclaw', async () => {
+    repo.upsertSession({ ...SESSION('cc', '2026-05-01T00:00:00Z'), agent: 'claude_code' } as any);
+    repo.upsertSession({ ...SESSION('oc', '2026-05-01T01:00:00Z'), agent: 'openclaw', backend_agent: 'admin' } as any);
+    const r = await app.request('/api/sessions?agent=openclaw');
+    const body = await r.json();
+    expect(body.sessions.map((s: any) => s.id)).toEqual(['oc']);
+    expect(body.applied_filter).toEqual({ agent: 'openclaw', backend_agent: null });
+  });
+
+  it('GET /api/sessions narrows by ?backend_agent=admin', async () => {
+    repo.upsertSession({ ...SESSION('oc-admin', '2026-05-01T00:00:00Z'), agent: 'openclaw', backend_agent: 'admin' } as any);
+    repo.upsertSession({ ...SESSION('oc-dev', '2026-05-01T01:00:00Z'), agent: 'openclaw', backend_agent: 'dev' } as any);
+    const r = await app.request('/api/sessions?agent=openclaw&backend_agent=admin');
+    const body = await r.json();
+    expect(body.sessions.map((s: any) => s.id)).toEqual(['oc-admin']);
+    expect(body.applied_filter).toEqual({ agent: 'openclaw', backend_agent: 'admin' });
+  });
+
+  it('GET /api/overview applied_filter echoes back the scope', async () => {
+    const r = await app.request('/api/overview?window=7d&agent=openclaw');
+    const body = await r.json();
+    expect(body.applied_filter).toEqual({ agent: 'openclaw', backend_agent: null });
+  });
+
+  it('GET /api/agents/claude-code/sub-agents returns the rollup', async () => {
+    const r = await app.request('/api/agents/claude-code/sub-agents?window=7d');
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body).toHaveProperty('window', '7d');
+    expect(Array.isArray(body.sub_agents)).toBe(true);
+  });
 });

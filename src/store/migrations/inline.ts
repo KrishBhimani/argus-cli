@@ -169,3 +169,20 @@ CREATE TRIGGER IF NOT EXISTS segments_au AFTER UPDATE ON transcript_segments BEG
   INSERT INTO transcript_fts(rowid, text) VALUES (new.rowid, new.text);
 END;
 `;
+
+// MIGRATION_004 — Slice 3 (OpenClaw + multi-agent).
+//   * Adds sessions.backend_agent — the named-agent subdivision under an
+//     agent backend. OpenClaw populates this with 'admin' / 'dev' / 'main'
+//     etc.; Claude Code leaves it NULL. Existing Claude Code rows are
+//     correct as-is (column defaults to NULL on ADD).
+//   * Adds turns.provider — kimi / anthropic / openai for OpenClaw; NULL
+//     for Claude Code (provider is implicitly Anthropic). Indexed so the
+//     OpenClaw provider rollup is a fast GROUP BY rather than a metadata
+//     JSON scan.
+export const MIGRATION_004 = `
+ALTER TABLE sessions ADD COLUMN backend_agent TEXT;
+CREATE INDEX IF NOT EXISTS idx_sessions_backend_agent ON sessions(agent, backend_agent);
+
+ALTER TABLE turns ADD COLUMN provider TEXT;
+CREATE INDEX IF NOT EXISTS idx_turns_provider ON turns(provider);
+`;

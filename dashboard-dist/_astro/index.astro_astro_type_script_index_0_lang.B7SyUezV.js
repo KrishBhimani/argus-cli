@@ -1,0 +1,11 @@
+import{g as w,e as c,s as b,c as C,d as E,n as v,t as q,u as S,a as A,l as j}from"./format.D2osPpbN.js";let r=[],d="started_at",o=!0,k={};const i=e=>document.querySelector(e),g=i("#t tbody"),y=i("#search"),N=i("#count");function f(e){return e.total_fresh_input_tokens+e.total_output_tokens+e.total_cache_read_tokens+e.total_cache_write_tokens}function B(e,n){return n.backendAgent?!1:n.agent?e.some(s=>s.agent===n.agent&&s.backend_agent!=null):!0}function m(){const e=y.value.toLowerCase();let n=r.filter(t=>!e||t.id.toLowerCase().includes(e)||t.project_path.toLowerCase().includes(e)||t.primary_model.toLowerCase().includes(e));const s=(t,a)=>a==="tokens"?f(t):t[a];n.sort((t,a)=>{const l=s(t,d),u=s(a,d),h=l==null?-1:u==null?1:l<u?-1:l>u?1:0;return o?-h:h}),N.textContent=`${n.length} of ${r.length} sessions`;const L=w(),_=B(r,L),p=document.querySelector(".agent-col");p&&(p.style.display=_?"":"none"),g.innerHTML=n.map(t=>{const a=_?`<td>${c(k[t.agent]??t.agent)}${t.backend_agent?` <span class="muted">/ ${c(t.backend_agent)}</span>`:""}</td>`:'<td style="display:none;"></td>';return`
+        <tr data-id="${encodeURIComponent(t.id)}">
+          <td>${b(t.started_at)}</td>
+          <td class="mono">${c(C(t.project_path,50))}</td>
+          ${a}
+          <td><code>${c(t.primary_model)}</code></td>
+          <td class="num">${E(t.duration_sec)}</td>
+          <td class="num">${v(t.turn_count)}</td>
+          <td class="num tok">${q(f(t))}</td>
+          <td class="num cost">~${S(t.total_cost_usd)}</td>
+        </tr>`}).join("")||'<tr><td colspan="8" class="empty">No sessions match.</td></tr>',g.querySelectorAll("tr[data-id]").forEach(t=>{t.addEventListener("click",()=>location.href="/session?id="+t.dataset.id)})}document.querySelectorAll("th[data-sort]").forEach(e=>{e.addEventListener("click",()=>{const n=e.dataset.sort;n===d?o=!o:(d=n,o=!0),document.querySelectorAll("th[data-sort]").forEach(s=>s.className=s.classList.contains("num")?"num":""),e.className=(o?"sorted":"sorted-asc")+(e.classList.contains("num")?" num":""),m()})});y.addEventListener("input",m);async function $(){const[e,n]=await Promise.all([A.sessions("?limit=10000"),j().catch(()=>[])]);k=Object.fromEntries(n.map(s=>[s.name,s.display_name])),r=e.sessions,m()}$();window.addEventListener("argus:filter-changed",$);

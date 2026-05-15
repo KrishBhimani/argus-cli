@@ -1,0 +1,88 @@
+---
+import Default from '../../layouts/Default.astro';
+---
+<Default title="OpenClaw — Argus">
+  <h1 style="margin-bottom: 0.4rem;">OpenClaw</h1>
+  <p class="muted" id="oc-summary" style="margin: 0 0 1.5rem; color: var(--text-2);">Loading…</p>
+
+  <section class="card">
+    <header class="card-header">
+      <h2>Named agents</h2>
+      <label>Window
+        <select id="oc-window">
+          <option value="today">today</option>
+          <option value="7d" selected>7d</option>
+          <option value="30d">30d</option>
+          <option value="all">all</option>
+        </select>
+      </label>
+    </header>
+    <table class="data-table">
+      <thead><tr><th>Name</th><th class="num">Sessions</th><th class="num">Tokens</th><th class="num">Cost (reported)</th><th>Last active</th></tr></thead>
+      <tbody id="oc-named-agents"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="card" style="margin-top: 1.5rem;">
+    <header class="card-header"><h2>Providers</h2></header>
+    <table class="data-table">
+      <thead><tr><th>Provider</th><th class="num">Models</th><th class="num">Sessions</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+      <tbody id="oc-providers"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </section>
+
+  <script type="module">
+    import { num as fmtNum, usd as fmtUsd, tok as fmtTok, ago as fmtRelative } from '/scripts/format.js';
+
+    const windowSel = document.getElementById('oc-window');
+    const namedBody = document.getElementById('oc-named-agents');
+    const provBody = document.getElementById('oc-providers');
+    const summary = document.getElementById('oc-summary');
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    async function refresh() {
+      const w = windowSel.value;
+      const [na, pr] = await Promise.all([
+        fetch('/api/agents/openclaw/named-agents?window=' + w).then(r => r.json()),
+        fetch('/api/agents/openclaw/providers?window=' + w).then(r => r.json()),
+      ]);
+
+      if (!na.named_agents || na.named_agents.length === 0) {
+        namedBody.innerHTML = '<tr><td colspan="5" class="muted">No OpenClaw activity in this window.</td></tr>';
+      } else {
+        namedBody.innerHTML = na.named_agents.map(a => `
+          <tr>
+            <td><a href="/sessions?agent=openclaw&backend_agent=${encodeURIComponent(a.name)}">${escapeHtml(a.name)}</a></td>
+            <td class="num">${fmtNum(a.sessions)}</td>
+            <td class="num">${fmtTok(a.tokens)}</td>
+            <td class="num">${fmtUsd(a.cost_usd)}</td>
+            <td>${a.last_active ? fmtRelative(a.last_active) : '—'}</td>
+          </tr>`).join('');
+      }
+
+      if (!pr.providers || pr.providers.length === 0) {
+        provBody.innerHTML = '<tr><td colspan="5" class="muted">No provider data in this window.</td></tr>';
+      } else {
+        provBody.innerHTML = pr.providers.map(p => `
+          <tr>
+            <td>${escapeHtml(p.provider)}</td>
+            <td class="num">${fmtNum(p.models)}</td>
+            <td class="num">${fmtNum(p.sessions)}</td>
+            <td class="num">${fmtTok(p.tokens)}</td>
+            <td class="num">${fmtUsd(p.cost_usd)}</td>
+          </tr>`).join('');
+      }
+
+      const totalSessions = (na.named_agents ?? []).reduce((a, x) => a + x.sessions, 0);
+      const totalTokens = (na.named_agents ?? []).reduce((a, x) => a + x.tokens, 0);
+      const totalCost = (na.named_agents ?? []).reduce((a, x) => a + x.cost_usd, 0);
+      const namedCount = (na.named_agents ?? []).length;
+      summary.textContent = `Last ${w} · ${namedCount} named agents · ${fmtNum(totalSessions)} sessions · ${fmtTok(totalTokens)} tokens · ${fmtUsd(totalCost)} reported`;
+    }
+    windowSel.addEventListener('change', refresh);
+    refresh();
+  </script>
+</Default>

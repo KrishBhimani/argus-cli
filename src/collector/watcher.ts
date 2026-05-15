@@ -24,11 +24,13 @@ export async function startWatcher(adapters: Adapter[], repo: Repository, table:
       awaitWriteFinish: { stabilityThreshold: opts.stabilityThresholdMs ?? 100, pollInterval: 30 },
     });
     const handle = async (p: string) => {
-      if (!p.endsWith('.jsonl')) return;
-      // Sub-agent files are only processed as a rollup under their parent
-      // session, never as standalone sessions. Skip them here so we don't
-      // double-count their turns into the overview totals.
-      if (p.includes('subagents')) return;
+      // Adapters can override the filter rule. Default (used by ClaudeCodeAdapter)
+      // is "ends with .jsonl AND not under subagents/" — sub-agent files are only
+      // processed as a rollup under their parent session, never standalone.
+      const accept = a.shouldIngestPath
+        ? a.shouldIngestPath(p)
+        : (p.endsWith('.jsonl') && !p.includes('subagents'));
+      if (!accept) return;
       try { await ingestFile(a, p, repo, table); }
       catch (e) { repo.recordParseError({ file: p, byte_offset: -1, reason: e instanceof Error ? e.message : String(e), raw_line_truncated: '' }); }
     };

@@ -2,12 +2,12 @@
 import { Command } from 'commander';
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
-import { existsSync, writeFileSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync } from 'node:fs';
 import open from 'open';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './store/db.js';
 import { Repository } from './store/repository.js';
-import { ClaudeCodeAdapter } from './adapters/claude_code/index.js';
+import { loadAdapters } from './adapters/registry.js';
 import { runFirstPassIngest } from './collector/first_run.js';
 import { startWatcher } from './collector/watcher.js';
 import { startServer } from './server/server.js';
@@ -26,12 +26,13 @@ program.command('start')
   .action(async ({ port, host, dataDir }) => {
     const db = openDb(join(dataDir, 'argus.db'));
     const repo = new Repository(db);
-    const claudeRoot = join(homedir(), '.claude');
-    if (!existsSync(claudeRoot)) {
-      console.error('No Claude Code log directory found at ~/.claude');
+    const adapters = loadAdapters(homedir());
+    if (adapters.length === 0) {
+      console.error('No supported agent log directories found at ~/.claude or ~/.openclaw');
+      console.error('Run a session in Claude Code or OpenClaw at least once, then try again.');
       process.exit(1);
     }
-    const adapters = [new ClaudeCodeAdapter(claudeRoot)];
+    console.log(`Argus: ${adapters.length} adapter(s) registered (${adapters.map(a => a.displayName).join(', ')})`);
     const table = await loadPricingTable();
     console.log('Argus: ingesting recent sessions...');
     const { foregroundDone, status } = runFirstPassIngest(adapters, repo, table, { recentDays: 30 });
