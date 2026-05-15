@@ -47,8 +47,8 @@ const onAgentPage = path.startsWith('/agents/');
     <span style="margin: 0 0.8rem;">·</span>
     <span id="pricing-info">Pricing —</span>
   </footer>
-  <script type="module">
-    import { getFilter, setFilter, loadAgents } from '/scripts/agents.js';
+  <script>
+    import { getFilter, setFilter, loadAgents } from '../scripts/agents';
 
     // ─── Status footer (existing behavior) ───────────────────────────
     async function refreshStatus() {
@@ -161,13 +161,22 @@ const onAgentPage = path.startsWith('/agents/');
     const pickerToggle = document.getElementById('agent-picker-toggle');
     const pickerMenu = document.getElementById('agent-picker-menu');
     if (pickerToggle && pickerMenu) {
-      pickerToggle.addEventListener('click', () => {
-        const open = pickerMenu.hidden;
-        pickerMenu.hidden = !open;
-        pickerToggle.setAttribute('aria-expanded', String(open));
+      pickerToggle.addEventListener('click', (e) => {
+        // Without stopPropagation, the document handler below fires on the
+        // same click — and because `e.target` is usually an inner span
+        // (the "Agent: All" label or "▾" caret), the doc handler would
+        // see it as "outside the toggle" and slam the menu closed in the
+        // same tick we tried to open it.
+        e.stopPropagation();
+        const isHidden = pickerMenu.hidden;
+        pickerMenu.hidden = !isHidden;
+        pickerToggle.setAttribute('aria-expanded', String(isHidden));
       });
       document.addEventListener('click', (e) => {
-        if (!pickerMenu.contains(e.target) && e.target !== pickerToggle) {
+        const target = e.target;
+        // Use .contains so child spans of the button (and child elements
+        // inside the menu) are correctly attributed to their parent.
+        if (target instanceof Node && !pickerMenu.contains(target) && !pickerToggle.contains(target)) {
           pickerMenu.hidden = true;
           pickerToggle.setAttribute('aria-expanded', 'false');
         }

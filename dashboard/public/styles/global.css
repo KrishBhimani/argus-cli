@@ -170,6 +170,10 @@ nav.app-nav a:hover, nav.app-nav a.active { color: var(--text-0); border-bottom-
 .agent-picker-option.active { color: var(--accent); font-weight: 600; }
 .agent-picker-loading { padding: 0.5rem 0.9rem; color: var(--text-2); font-size: 0.85rem; }
 
+/* `display: flex` above overrides the user-agent default `[hidden] { display: none }`,
+   so setting the hidden attribute via JS had no visual effect. Restore it explicitly. */
+.agent-picker-menu[hidden], .nav-dropdown-menu[hidden] { display: none; }
+
 main { padding: 1.5rem 2rem 4rem; max-width: 1200px; margin: 0 auto; }
 
 footer.app-footer {

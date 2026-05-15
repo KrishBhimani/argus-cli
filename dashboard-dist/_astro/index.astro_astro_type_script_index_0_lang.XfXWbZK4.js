@@ -1,0 +1,11 @@
+import{a as b}from"./api.BABVPoSJ.js";import{e as c,s as w,b as C,d as E,n as v,t as q,u as S}from"./format.BCwVRjzP.js";import{g as A,l as j}from"./agents.BHBYKnbB.js";let r=[],d="started_at",o=!0,k={};const u=e=>document.querySelector(e),f=u("#t tbody"),y=u("#search"),N=u("#count");function g(e){return e.total_fresh_input_tokens+e.total_output_tokens+e.total_cache_read_tokens+e.total_cache_write_tokens}function B(e,n){return n.backendAgent?!1:n.agent?e.some(s=>s.agent===n.agent&&s.backend_agent!=null):!0}function m(){const e=y.value.toLowerCase();let n=r.filter(t=>!e||t.id.toLowerCase().includes(e)||t.project_path.toLowerCase().includes(e)||t.primary_model.toLowerCase().includes(e));const s=(t,a)=>a==="tokens"?g(t):t[a];n.sort((t,a)=>{const l=s(t,d),i=s(a,d),h=l==null?-1:i==null?1:l<i?-1:l>i?1:0;return o?-h:h}),N.textContent=`${n.length} of ${r.length} sessions`;const L=A(),p=B(r,L),_=document.querySelector(".agent-col");_&&(_.style.display=p?"":"none"),f.innerHTML=n.map(t=>{const a=p?`<td>${c(k[t.agent]??t.agent)}${t.backend_agent?` <span class="muted">/ ${c(t.backend_agent)}</span>`:""}</td>`:'<td style="display:none;"></td>';return`
+        <tr data-id="${encodeURIComponent(t.id)}">
+          <td>${w(t.started_at)}</td>
+          <td class="mono">${c(C(t.project_path,50))}</td>
+          ${a}
+          <td><code>${c(t.primary_model)}</code></td>
+          <td class="num">${E(t.duration_sec)}</td>
+          <td class="num">${v(t.turn_count)}</td>
+          <td class="num tok">${q(g(t))}</td>
+          <td class="num cost">~${S(t.total_cost_usd)}</td>
+        </tr>`}).join("")||'<tr><td colspan="8" class="empty">No sessions match.</td></tr>',f.querySelectorAll("tr[data-id]").forEach(t=>{t.addEventListener("click",()=>location.href="/session?id="+t.dataset.id)})}document.querySelectorAll("th[data-sort]").forEach(e=>{e.addEventListener("click",()=>{const n=e.dataset.sort;n===d?o=!o:(d=n,o=!0),document.querySelectorAll("th[data-sort]").forEach(s=>s.className=s.classList.contains("num")?"num":""),e.className=(o?"sorted":"sorted-asc")+(e.classList.contains("num")?" num":""),m()})});y.addEventListener("input",m);async function $(){const[e,n]=await Promise.all([b.sessions("?limit=10000"),j().catch(()=>[])]);k=Object.fromEntries(n.map(s=>[s.name,s.display_name])),r=e.sessions,m()}$();window.addEventListener("argus:filter-changed",$);

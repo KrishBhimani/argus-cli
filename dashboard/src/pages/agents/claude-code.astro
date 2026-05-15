@@ -28,8 +28,8 @@ import Default from '../../layouts/Default.astro';
     <p class="muted" style="padding: 0 1rem 1rem;">Reserved space for file-history hotspots, skills inventory, and other Claude-Code-specific views. See <code>docs/feature-backlog.md</code>.</p>
   </section>
 
-  <script type="module">
-    import { num as fmtNum } from '/scripts/format.js';
+  <script>
+    import { num as fmtNum } from '../../scripts/format';
 
     const windowSel = document.getElementById('cc-window');
     const body = document.getElementById('cc-subagents');

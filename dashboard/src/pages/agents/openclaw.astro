@@ -31,8 +31,8 @@ import Default from '../../layouts/Default.astro';
     </table>
   </section>
 
-  <script type="module">
-    import { num as fmtNum, usd as fmtUsd, tok as fmtTok, ago as fmtRelative } from '/scripts/format.js';
+  <script>
+    import { num as fmtNum, usd as fmtUsd, tok as fmtTok, ago as fmtRelative } from '../../scripts/format';
 
     const windowSel = document.getElementById('oc-window');
     const namedBody = document.getElementById('oc-named-agents');
