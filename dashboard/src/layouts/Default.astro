@@ -20,12 +20,6 @@ const onAgentPage = path.startsWith('/agents/');
       <a href="/tools" class={path === '/tools' ? 'active' : ''}>Tools</a>
       <a href="/trends" class={path === '/trends' ? 'active' : ''}>Trends</a>
       <a href="/models" class={path === '/models' ? 'active' : ''}>Models</a>
-      <details class={`nav-dropdown ${path.startsWith('/agents/') ? 'active' : ''}`} id="agents-dropdown">
-        <summary>Agents <span class="caret">▾</span></summary>
-        <div class="nav-dropdown-menu" id="agents-menu">
-          <span class="nav-dropdown-loading">Loading…</span>
-        </div>
-      </details>
       <a href="/prompts" class={path === '/prompts' ? 'active' : ''}>Prompts</a>
       <a href="/settings" class={path === '/settings' ? 'active' : ''}>Settings</a>
     </nav>
@@ -77,23 +71,6 @@ const onAgentPage = path.startsWith('/agents/');
     }
     refreshStatus();
     setInterval(refreshStatus, 4000);
-
-    // ─── Agents nav dropdown ──────────────────────────────────────────
-    async function renderAgentsNav() {
-      try {
-        const agents = await loadAgents();
-        const menu = document.getElementById('agents-menu');
-        if (!menu) return;
-        if (!agents.length) {
-          menu.innerHTML = '<span class="nav-dropdown-empty">No agents registered</span>';
-          return;
-        }
-        menu.innerHTML = agents
-          .map(a => `<a href="${a.page_path}">${escapeHtml(a.display_name)}</a>`)
-          .join('');
-      } catch { /* no-op */ }
-    }
-    renderAgentsNav();
 
     function escapeHtml(s) {
       return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

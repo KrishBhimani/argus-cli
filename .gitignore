@@ -4,6 +4,7 @@ dist/
 .env
 .env.local
 .argus/
+.superpowers/
 .DS_Store
 .vitest-cache/
 coverage/
