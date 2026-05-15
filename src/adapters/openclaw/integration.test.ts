@@ -2,9 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { OpenClawAdapter } from './index.js';
 
-const FIXTURE = new URL('./__fixtures__/sample-session.jsonl', import.meta.url).pathname;
+// `.pathname` on a file:// URL is platform-confused on Windows — it returns
+// "/D:/a/..." which Node then concatenates with the current drive ("D:\\D:\\a\\...")
+// when handed to fs.copyFileSync. fileURLToPath does the OS-correct conversion.
+const FIXTURE = fileURLToPath(new URL('./__fixtures__/sample-session.jsonl', import.meta.url));
 
 describe('OpenClawAdapter (integration)', () => {
   it('exposes the expected agent + capabilities', () => {
