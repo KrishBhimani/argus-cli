@@ -140,6 +140,25 @@ def test_trends_groups_by_day_and_agent(api_client, repo):
     assert len(body["points"]) > 0
 
 
+def test_trends_granularity_week_does_not_crash(api_client, repo):
+    """REGRESSION: ``rebucket`` passes a date-only string (from
+    ``substr(timestamp, 1, 10)``) into ``_week_of``, which previously
+    raised ``TypeError: can't subtract offset-naive and offset-aware
+    datetimes`` because the date-only form parses as a naive datetime."""
+    ts = _iso(datetime.now(timezone.utc) - timedelta(days=1))
+    repo.upsert_session(session_factory("a", ts))
+    repo.upsert_turn(turn_factory("a-t1", "a", ts))
+    r = api_client.get("/api/trends?granularity=week&groupBy=agent")
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body["points"], list)
+    assert len(body["points"]) > 0
+    # Bucket label format is "YYYY-W##".
+    bucket = body["points"][0]["bucket"]
+    assert bucket[4:6] == "-W"
+    assert bucket[6:].isdigit() and len(bucket[6:]) == 2
+
+
 def test_ingest_status_reports(api_client):
     r = api_client.get("/api/ingest/status")
     body = r.json()

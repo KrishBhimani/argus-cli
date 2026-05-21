@@ -45,11 +45,33 @@ def _is_meaningful(s: Session) -> bool:
 
 
 def _week_of(iso: str) -> str:
-    """Match the TS weekOf() implementation byte-for-byte."""
+    """Match the TS weekOf() byte-for-byte.
+
+    Two subtleties relative to a naive Python port of the original JS:
+
+    1. Day-of-week numbering. Python's ``datetime.weekday()`` numbers days
+       as Mon=0..Sun=6, but JS's ``Date.getUTCDay()`` is Sun=0..Sat=6.
+       Using ``weekday()`` directly would silently shift the week number
+       by one for any year whose Jan 1 isn't aligned in a specific way
+       (e.g., 2024-01-07 falls in week 1 instead of week 2). The
+       ``(weekday() + 1) % 7`` adjustment converts to JS's numbering.
+
+    2. Input shape. Callers pass either a full ISO timestamp ending in
+       ``Z`` (when this helper is exercised in tests) or a date-only
+       string like ``"2026-05-22"`` (the production path — that's what
+       ``substr(timestamp, 1, 10)`` returns from
+       ``aggregate_turns_by_day``). The date-only form parses as a
+       naive ``datetime``; we promote it to UTC before subtracting from
+       the aware ``start`` so the math doesn't raise ``TypeError:
+       can't subtract offset-naive and offset-aware datetimes``.
+    """
     d = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
     start = datetime(d.year, 1, 1, tzinfo=timezone.utc)
     diff = (d - start).total_seconds() / 86_400
-    return f"{int((diff + start.weekday()) // 7) + 1:02d}"
+    js_day_of_week = (start.weekday() + 1) % 7
+    return f"{int((diff + js_day_of_week) // 7) + 1:02d}"
 
 
 def _cutoff_iso_for_window(window: str) -> str:
