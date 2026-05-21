@@ -1,15 +1,21 @@
 # Argus
 
-**Local-first analytics for Claude Code.** Argus reads your `~/.claude/`
-session logs, computes cost from a bundled pricing table, and serves a
-dashboard at `http://localhost:4242` that tells you exactly how, when,
-and how much you've been using Claude Code.
+**Local-first analytics + persistent archive for Claude Code.** Argus reads
+your `~/.claude/` session logs, computes cost from a bundled pricing table,
+and serves a dashboard at `http://localhost:4242` that tells you exactly how,
+when, and how much you've been using Claude Code.
+
+Claude Code rotates its own session files (`cleanupPeriodDays` defaults to
+30). Once Argus ingests a session into `~/.argus/argus.db`, the row stays
+forever — so a few months in, Argus knows about sessions Claude has already
+deleted. Live tools like `ccusage` can only show what's currently on disk;
+Argus accumulates.
 
 Everything stays on your machine. No telemetry, no API calls, no
 embeddings — just SQLite and a static web UI.
 
 ```sh
-npm install -g argus-cli
+pipx install argus-cli     # or:  uv tool install argus-cli
 argus start
 ```
 
@@ -99,37 +105,55 @@ For vulnerability reports, see [SECURITY.md](./SECURITY.md).
 
 ## Requirements
 
-- **Node.js ≥ 22.** `better-sqlite3` ships prebuilt binaries for macOS
-  (x64 + arm64), Linux (x64 + arm64), and Windows (x64) on Node 22, so
-  installation is fast and doesn't require a C++ toolchain on those
-  platforms.
+- **Python ≥ 3.11.** Argus uses the stdlib `sqlite3` module — make sure
+  your Python was built with FTS5 (the standard CPython distributions
+  for macOS, Linux, and Windows all are). Argus checks at startup and
+  fails with a clear error if FTS5 is missing.
 - A `~/.claude/` directory containing real session JSONL — i.e. you've
   used Claude Code at least once. Argus exits with a friendly message
   if it's missing.
+
+## Keep your history longer
+
+By default Claude Code deletes session files after 30 days. To extend the
+window, set `cleanupPeriodDays` in `~/.claude/settings.json`:
+
+```json
+{
+  "cleanupPeriodDays": 365
+}
+```
+
+The minimum is 1; there's no way to disable cleanup entirely. Whatever you
+set, Argus's own database keeps the data even after Claude rotates it out.
 
 ## Development
 
 ```sh
 git clone https://github.com/KrishBhimani/argus-cli.git
 cd argus-cli
-npm install
-npm test           # 98 tests, ~3s
-npm run build      # tsc + astro build
-npm run dev        # tsx src/cli.ts start
+uv sync               # install deps + create venv
+uv run pytest         # ~120 tests, ~10s
+uv run argus start    # dev — runs directly from source
 ```
+
+The dashboard is an Astro project under `dashboard/` and still builds via
+`npm` at release time only. End users never touch npm.
 
 Source layout:
 
 ```
-src/                  TypeScript ingest, store, server, CLI
-src/adapters/         Claude Code JSONL parsers
-src/store/            SQLite schema + migrations + repo
-src/server/           hono API
-src/collector/        watcher + pipeline + first-run + search backfill
-src/pricing/          LiteLLM-derived price table + cost compute
+python/argus/         Python ingest, store, server, CLI
+  adapters/           Claude Code JSONL parsers + adapter registry
+  store/              SQLite schema + migrations + repo
+  server/             FastAPI app + /api routes
+  collector/          watcher + pipeline + first-run + search backfill
+  pricing/            LiteLLM-derived price table + cost compute
+  schema/             pydantic data models
 dashboard/            Astro source
-dashboard-dist/       Astro build output (shipped in npm tarball)
-pricing/              Bundled pricing JSON (shipped)
+dashboard-dist/       Astro build output (shipped in wheel as data)
+pricing/              Bundled pricing JSON (shipped in wheel as data)
+tests/                pytest suite, mirrors python/argus/ layout
 ```
 
 ## License

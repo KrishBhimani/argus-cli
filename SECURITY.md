@@ -29,8 +29,8 @@ Argus is built for one user, one machine. It assumes:
 - **Untrusted JSONL contents.** Session logs are produced by Claude
   Code, but their contents (model names, project paths, transcript
   text, tool inputs) are user-controlled. Argus treats them as
-  untrusted input — they're parsed with `zod` schemas, escaped before
-  rendering in the dashboard, and never executed.
+  untrusted input — they're parsed with `pydantic` schemas, escaped
+  before rendering in the dashboard, and never executed.
 - **Untrusted browsers visiting localhost.** Other webpages the user
   loads while Argus is running are not trusted. They cannot read
   Argus data (Same-Origin Policy on responses) and cannot trigger
@@ -65,8 +65,8 @@ The following are **not** security issues for the purpose of this policy:
   `argus pricing refresh` to close the gap; (b) argus distinguishes
   5-minute vs 1-hour cache-write rates where ccusage uses one flat
   rate. Both are deliberate choices, not security issues.
-- npm `audit --omit=dev` flags a transitive devDependency vulnerability.
-  devDependencies don't ship to package consumers.
+- A dev-only dependency (pytest, freezegun, pytest-cov) has a CVE.
+  Dev-only dependencies don't ship to wheel consumers.
 
 ## What's already hardened
 
@@ -78,16 +78,20 @@ Things this codebase deliberately does to reduce attack surface:
   `escapeHtml()` before reaching `innerHTML`. The only HTML allowed
   through is `<mark>...</mark>` from FTS5 `snippet()`, applied via a
   separate `safeSnippet()` helper that escapes everything else.
-- `chokidar` runs with `followSymlinks: false`. `discoverSessionFiles`
-  additionally `realpath`-resolves each candidate and rejects anything
-  outside the canonical `~/.claude/` tree.
+- `watchdog` does not follow symlinks by default. `discover_session_files`
+  additionally calls `Path.resolve(strict=True)` on each candidate
+  and rejects anything that doesn't canonicalise under the
+  `~/.claude/` tree.
 - Per-tick read cap of 64 MiB on session JSONL and `history.jsonl`,
   so a runaway or hostile multi-GB file can't OOM the process.
-- CSRF Origin check on all non-GET API routes.
-- No `postinstall` / `preinstall` scripts in `package.json`.
-- `package.json:files` whitelist — only `dist/`, `pricing/`,
-  `dashboard-dist/`, `README.md`, `LICENSE`, `SECURITY.md` ship. No
-  source, no tests, no docs, no config.
+- CSRF Origin check on all non-GET API routes (FastAPI middleware in
+  `python/argus/server/app.py`).
+- No build hooks running on user machines. The wheel ships pure Python
+  + bundled data (`dashboard-dist/` + `pricing/`). Installation runs
+  no arbitrary code.
+- `pyproject.toml` `[tool.hatch.build.targets.wheel]` whitelist — only
+  `python/argus`, `dashboard-dist`, `pricing` ship. No source tests,
+  no docs, no `src/` legacy.
 
 If you spot a regression on any of the above, that's a real bug and
 worth reporting.

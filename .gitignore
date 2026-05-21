@@ -10,3 +10,17 @@ coverage/
 
 # Personal planning notes — kept local, not published
 docs/
+
+# Python build / virtualenv / cache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/

@@ -1,0 +1,646 @@
+"""Repository — all SQL lives here.
+
+Direct port of src/store/repository.ts. Methods keep the same names so
+test files port over verbatim. Named placeholders use SQLite's ``:name``
+syntax instead of better-sqlite3's ``@name``.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from ..schema.types import (
+    Prompt,
+    Session,
+    ToolCall,
+    TranscriptSegment,
+    Turn,
+)
+
+
+def normalize_project_path(p: str) -> str:
+    """Same project_path normalization used by session ingest and history ingest.
+
+    Replaces backslashes with forward slashes; on Windows additionally
+    lowercases everything. Trailing slash stripped. Empty input preserved.
+    The history.jsonl and session-ingest sides MUST agree byte-for-byte
+    so the prompt → session linkage join hits.
+    """
+    if not p:
+        return ""
+    s = p.replace("\\", "/").rstrip("/")
+    if sys.platform == "win32":
+        s = s.lower()
+    return s
+
+
+def _iso_to_ms(iso: str | None) -> int | None:
+    """Convert an ISO-8601 timestamp string to ms since epoch, or None."""
+    if not iso:
+        return None
+    try:
+        # fromisoformat handles trailing 'Z' from Python 3.11+
+        s = iso.replace("Z", "+00:00") if iso.endswith("Z") else iso
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except (ValueError, TypeError):
+        return None
+
+
+def _row_to_session(row: sqlite3.Row) -> Session:
+    """SQLite row → Session, dropping the denormalized *_at_ms columns."""
+    d = dict(row)
+    d.pop("started_at_ms", None)
+    d.pop("ended_at_ms", None)
+    d["metadata"] = json.loads(d["metadata"])
+    return Session.model_validate(d)
+
+
+def _row_to_turn(row: sqlite3.Row) -> Turn:
+    d = dict(row)
+    d["metadata"] = json.loads(d["metadata"])
+    return Turn.model_validate(d)
+
+
+class Repository:
+    """All SQL is encapsulated here. Methods are mostly direct ports."""
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self.db = db
+
+    # ─── Sessions ──────────────────────────────────────────────────────
+
+    def upsert_session(self, s: Session) -> None:
+        started_ms = _iso_to_ms(s.started_at)
+        ended_ms = _iso_to_ms(s.ended_at)
+        params = {
+            "id": s.id,
+            "agent": s.agent,
+            "agent_version": s.agent_version,
+            "project_path": normalize_project_path(s.project_path),
+            "started_at": s.started_at,
+            "ended_at": s.ended_at,
+            "duration_sec": s.duration_sec,
+            "total_fresh_input_tokens": s.total_fresh_input_tokens,
+            "total_output_tokens": s.total_output_tokens,
+            "total_cache_read_tokens": s.total_cache_read_tokens,
+            "total_cache_write_tokens": s.total_cache_write_tokens,
+            "total_cost_usd": s.total_cost_usd,
+            "primary_model": s.primary_model,
+            "turn_count": s.turn_count,
+            "pricing_table_version": s.pricing_table_version,
+            "computed_at": s.computed_at,
+            "agent_reported_cost_usd": s.agent_reported_cost_usd,
+            "metadata": json.dumps(s.metadata),
+            "started_at_ms": started_ms,
+            "ended_at_ms": ended_ms,
+        }
+        self.db.execute(
+            """
+            INSERT INTO sessions (id, agent, agent_version, project_path, started_at, ended_at, duration_sec,
+              total_fresh_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_write_tokens,
+              total_cost_usd, primary_model, turn_count, pricing_table_version, computed_at,
+              agent_reported_cost_usd, metadata, started_at_ms, ended_at_ms)
+            VALUES (:id, :agent, :agent_version, :project_path, :started_at, :ended_at, :duration_sec,
+              :total_fresh_input_tokens, :total_output_tokens, :total_cache_read_tokens, :total_cache_write_tokens,
+              :total_cost_usd, :primary_model, :turn_count, :pricing_table_version, :computed_at,
+              :agent_reported_cost_usd, :metadata, :started_at_ms, :ended_at_ms)
+            ON CONFLICT(id) DO UPDATE SET
+              agent_version=excluded.agent_version, project_path=excluded.project_path,
+              ended_at=excluded.ended_at, duration_sec=excluded.duration_sec,
+              total_fresh_input_tokens=excluded.total_fresh_input_tokens,
+              total_output_tokens=excluded.total_output_tokens,
+              total_cache_read_tokens=excluded.total_cache_read_tokens,
+              total_cache_write_tokens=excluded.total_cache_write_tokens,
+              total_cost_usd=excluded.total_cost_usd, primary_model=excluded.primary_model,
+              turn_count=excluded.turn_count, pricing_table_version=excluded.pricing_table_version,
+              computed_at=excluded.computed_at, agent_reported_cost_usd=excluded.agent_reported_cost_usd,
+              metadata=excluded.metadata,
+              started_at_ms=excluded.started_at_ms, ended_at_ms=excluded.ended_at_ms
+            """,
+            params,
+        )
+
+    def get_session(self, session_id: str) -> Session | None:
+        row = self.db.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        return _row_to_session(row) if row else None
+
+    def list_sessions(
+        self, *, limit: int, offset: int = 0, agent: str | None = None
+    ) -> list[Session]:
+        if agent:
+            rows = self.db.execute(
+                "SELECT * FROM sessions WHERE agent = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (agent, limit, offset),
+            ).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM sessions ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        return [_row_to_session(r) for r in rows]
+
+    # ─── Turns ─────────────────────────────────────────────────────────
+
+    def upsert_turn(self, t: Turn) -> None:
+        params = {
+            "id": t.id,
+            "session_id": t.session_id,
+            "sequence": t.sequence,
+            "timestamp": t.timestamp,
+            "model": t.model,
+            "model_raw": t.model_raw,
+            "fresh_input_tokens": t.fresh_input_tokens,
+            "output_tokens": t.output_tokens,
+            "cache_read_tokens": t.cache_read_tokens,
+            "cache_write_tokens": t.cache_write_tokens,
+            "cache_write_5m_tokens": t.cache_write_5m_tokens,
+            "cache_write_1h_tokens": t.cache_write_1h_tokens,
+            "tool_calls_count": t.tool_calls_count,
+            "cost_usd": t.cost_usd,
+            "metadata": json.dumps(t.metadata),
+        }
+        self.db.execute(
+            """
+            INSERT INTO turns (id, session_id, sequence, timestamp, model, model_raw,
+              fresh_input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+              cache_write_5m_tokens, cache_write_1h_tokens, tool_calls_count, cost_usd, metadata)
+            VALUES (:id, :session_id, :sequence, :timestamp, :model, :model_raw,
+              :fresh_input_tokens, :output_tokens, :cache_read_tokens, :cache_write_tokens,
+              :cache_write_5m_tokens, :cache_write_1h_tokens, :tool_calls_count, :cost_usd, :metadata)
+            ON CONFLICT(id) DO UPDATE SET
+              sequence=excluded.sequence, timestamp=excluded.timestamp, model=excluded.model,
+              model_raw=excluded.model_raw, fresh_input_tokens=excluded.fresh_input_tokens,
+              output_tokens=excluded.output_tokens, cache_read_tokens=excluded.cache_read_tokens,
+              cache_write_tokens=excluded.cache_write_tokens,
+              cache_write_5m_tokens=excluded.cache_write_5m_tokens,
+              cache_write_1h_tokens=excluded.cache_write_1h_tokens,
+              tool_calls_count=excluded.tool_calls_count, cost_usd=excluded.cost_usd,
+              metadata=excluded.metadata
+            """,
+            params,
+        )
+
+    def get_turns_for_session(self, session_id: str) -> list[Turn]:
+        rows = self.db.execute(
+            "SELECT * FROM turns WHERE session_id = ? ORDER BY sequence",
+            (session_id,),
+        ).fetchall()
+        return [_row_to_turn(r) for r in rows]
+
+    # ─── File offsets / parse errors ───────────────────────────────────
+
+    def set_file_offset(self, path: str, offset: int) -> None:
+        self.db.execute(
+            """
+            INSERT INTO file_offsets (path, byte_offset, last_seen) VALUES (?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET byte_offset=excluded.byte_offset, last_seen=excluded.last_seen
+            """,
+            (path, offset, datetime.now(timezone.utc).isoformat()),
+        )
+
+    def get_file_offset(self, path: str) -> int:
+        row = self.db.execute(
+            "SELECT byte_offset FROM file_offsets WHERE path = ?", (path,)
+        ).fetchone()
+        return row["byte_offset"] if row else 0
+
+    def record_parse_error(self, e: dict[str, Any]) -> None:
+        self.db.execute(
+            """
+            INSERT INTO parse_errors (file, byte_offset, reason, raw_line_truncated, occurred_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                e["file"],
+                e["byte_offset"],
+                e["reason"],
+                e["raw_line_truncated"],
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+    def recent_parse_errors(self, limit: int) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            "SELECT file, byte_offset, reason, raw_line_truncated FROM parse_errors ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ─── Tool calls ────────────────────────────────────────────────────
+
+    def upsert_tool_calls(self, calls: list[ToolCall]) -> None:
+        if not calls:
+            return
+        rows = [
+            {
+                "id": c.id,
+                "session_id": c.session_id,
+                "turn_index": c.turn_index,
+                "tool_name": c.tool_name,
+                "is_error": c.is_error,
+                "input_size": c.input_size,
+                "subagent_type": c.subagent_type,
+                "timestamp": c.timestamp,
+            }
+            for c in calls
+        ]
+        with self.db:
+            self.db.executemany(
+                """
+                INSERT INTO tool_calls (id, session_id, turn_index, tool_name, is_error, input_size, subagent_type, timestamp)
+                VALUES (:id, :session_id, :turn_index, :tool_name, :is_error, :input_size, :subagent_type, :timestamp)
+                ON CONFLICT(id) DO UPDATE SET
+                  turn_index=excluded.turn_index, tool_name=excluded.tool_name,
+                  is_error=excluded.is_error, input_size=excluded.input_size,
+                  subagent_type=excluded.subagent_type, timestamp=excluded.timestamp
+                """,
+                rows,
+            )
+
+    def count_tool_calls_for_session(self, session_id: str) -> int:
+        row = self.db.execute(
+            "SELECT COUNT(*) AS n FROM tool_calls WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        return row["n"] if row else 0
+
+    def tool_leaderboard(
+        self, cutoff_iso: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            """
+            SELECT tool_name AS name, COUNT(*) AS calls, SUM(is_error) AS errors
+            FROM tool_calls
+            WHERE timestamp >= ?
+            GROUP BY tool_name
+            ORDER BY calls DESC
+            LIMIT ?
+            """,
+            (cutoff_iso, limit),
+        ).fetchall()
+        return [
+            {"name": r["name"], "calls": r["calls"], "errors": r["errors"] or 0}
+            for r in rows
+        ]
+
+    def tool_calls_total(self, cutoff_iso: str) -> dict[str, int]:
+        row = self.db.execute(
+            """
+            SELECT COUNT(*) AS total, COALESCE(SUM(is_error), 0) AS errors
+            FROM tool_calls WHERE timestamp >= ?
+            """,
+            (cutoff_iso,),
+        ).fetchone()
+        return {
+            "total": row["total"] if row else 0,
+            "errors": row["errors"] if row else 0,
+        }
+
+    def aggregate_turns_by_day(self, cutoff_iso: str) -> list[dict[str, Any]]:
+        """Per-turn aggregation for windowed views.
+
+        Returns one row per (day, model, session_id) inside the cutoff.
+        Sub-agent rollup ids contain ``/`` and are excluded (their turns
+        roll into the parent session via the pipeline).
+        """
+        rows = self.db.execute(
+            """
+            SELECT
+              substr(timestamp, 1, 10) AS day,
+              model,
+              session_id,
+              COALESCE(SUM(cost_usd), 0) AS cost,
+              COALESCE(SUM(fresh_input_tokens), 0) AS fresh_input,
+              COALESCE(SUM(output_tokens), 0) AS output,
+              COALESCE(SUM(cache_read_tokens), 0) AS cache_read,
+              COALESCE(SUM(cache_write_tokens), 0) AS cache_write
+            FROM turns
+            WHERE timestamp >= ?
+              AND session_id NOT LIKE '%/%'
+            GROUP BY day, model, session_id
+            ORDER BY day ASC
+            """,
+            (cutoff_iso,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mcp_tool_calls(self, cutoff_iso: str) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            r"""
+            SELECT tool_name, COUNT(*) AS calls, SUM(is_error) AS errors
+            FROM tool_calls
+            WHERE timestamp >= ? AND tool_name LIKE 'mcp\_\_%' ESCAPE '\'
+            GROUP BY tool_name
+            """,
+            (cutoff_iso,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def subagent_calls(self, cutoff_iso: str) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            """
+            SELECT subagent_type AS type, COUNT(*) AS calls, COALESCE(SUM(is_error), 0) AS errors
+            FROM tool_calls
+            WHERE timestamp >= ? AND subagent_type IS NOT NULL AND subagent_type <> ''
+            GROUP BY subagent_type
+            ORDER BY calls DESC
+            """,
+            (cutoff_iso,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def sessions_missing_tool_calls(self, limit: int) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            """
+            SELECT s.id FROM sessions s
+            LEFT JOIN (SELECT DISTINCT session_id FROM tool_calls) t ON t.session_id = s.id
+            WHERE t.session_id IS NULL
+            ORDER BY s.started_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
+
+    # ─── Prompts ───────────────────────────────────────────────────────
+
+    def insert_prompts(self, rows: list[Prompt]) -> None:
+        if not rows:
+            return
+        params = [
+            {
+                "timestamp_ms": r.timestamp_ms,
+                "project_path": r.project_path,
+                "display": r.display,
+                "pasted_chars": r.pasted_chars,
+                "is_slash": r.is_slash,
+            }
+            for r in rows
+        ]
+        with self.db:
+            self.db.executemany(
+                """
+                INSERT INTO prompts (timestamp_ms, project_path, display, pasted_chars, is_slash)
+                VALUES (:timestamp_ms, :project_path, :display, :pasted_chars, :is_slash)
+                """,
+                params,
+            )
+
+    def search_prompts(
+        self,
+        *,
+        q: str | None = None,
+        limit: int,
+        project: str | None = None,
+        include_slash: bool = False,
+    ) -> dict[str, Any]:
+        slash_clause = "1=1" if include_slash else "is_slash = 0"
+        project_clause = "AND p.project_path = ?" if project else ""
+        project_params: tuple = (project,) if project else ()
+
+        if q and q.strip():
+            fts = q.strip()
+            sql = f"""
+                SELECT p.*, snippet(prompts_fts, 0, '<mark>', '</mark>', '…', 16) AS snippet
+                FROM prompts_fts
+                JOIN prompts p ON p.id = prompts_fts.rowid
+                WHERE prompts_fts MATCH ? AND {slash_clause} {project_clause}
+                ORDER BY bm25(prompts_fts)
+                LIMIT ?
+            """
+            count_sql = f"""
+                SELECT COUNT(*) AS n FROM prompts_fts
+                JOIN prompts p ON p.id = prompts_fts.rowid
+                WHERE prompts_fts MATCH ? AND {slash_clause} {project_clause}
+            """
+            params = (fts, *project_params)
+            rows = [dict(r) for r in self.db.execute(sql, (*params, limit)).fetchall()]
+            total_row = self.db.execute(count_sql, params).fetchone()
+            return {"total": total_row["n"] if total_row else 0, "rows": rows}
+
+        sql = f"""
+            SELECT p.*, p.display AS snippet
+            FROM prompts p
+            WHERE {slash_clause} {project_clause}
+            ORDER BY p.timestamp_ms DESC
+            LIMIT ?
+        """
+        count_sql = f"""
+            SELECT COUNT(*) AS n FROM prompts p
+            WHERE {slash_clause} {project_clause}
+        """
+        rows = [dict(r) for r in self.db.execute(sql, (*project_params, limit)).fetchall()]
+        total_row = self.db.execute(count_sql, project_params).fetchone()
+        return {"total": total_row["n"] if total_row else 0, "rows": rows}
+
+    def prompt_stats(self) -> dict[str, Any]:
+        row = self.db.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   COUNT(DISTINCT project_path) AS projects,
+                   MIN(timestamp_ms) AS oldest_ms
+            FROM prompts
+            """
+        ).fetchone()
+        return {
+            "total": row["total"] if row else 0,
+            "projects": row["projects"] if row else 0,
+            "oldest_ms": row["oldest_ms"] if row else None,
+        }
+
+    def prompt_projects(self) -> list[str]:
+        rows = self.db.execute(
+            "SELECT DISTINCT project_path FROM prompts ORDER BY project_path"
+        ).fetchall()
+        return [r["project_path"] for r in rows]
+
+    def link_prompt_to_session(self, project_path: str, timestamp_ms: int) -> str | None:
+        row = self.db.execute(
+            """
+            SELECT id FROM sessions
+            WHERE project_path = ?
+              AND started_at_ms IS NOT NULL
+              AND started_at_ms <= ?
+              AND (ended_at_ms IS NULL OR ended_at_ms >= ?)
+            ORDER BY ABS(started_at_ms - ?)
+            LIMIT 1
+            """,
+            (project_path, timestamp_ms, timestamp_ms, timestamp_ms),
+        ).fetchone()
+        return row["id"] if row else None
+
+    # ─── Transcript segments ───────────────────────────────────────────
+
+    def upsert_transcript_segments(self, rows: list[TranscriptSegment]) -> None:
+        if not rows:
+            return
+        params = [
+            {
+                "uid": r.uid,
+                "session_id": r.session_id,
+                "timestamp": r.timestamp,
+                "role": r.role,
+                "text": r.text,
+            }
+            for r in rows
+        ]
+        with self.db:
+            self.db.executemany(
+                """
+                INSERT INTO transcript_segments (uid, session_id, timestamp, role, text)
+                VALUES (:uid, :session_id, :timestamp, :role, :text)
+                ON CONFLICT(uid) DO UPDATE SET
+                  session_id=excluded.session_id, timestamp=excluded.timestamp,
+                  role=excluded.role, text=excluded.text
+                """,
+                params,
+            )
+
+    def count_segments_for_session(self, session_id: str) -> int:
+        row = self.db.execute(
+            "SELECT COUNT(*) AS n FROM transcript_segments WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        return row["n"] if row else 0
+
+    def sessions_missing_segments(self, limit: int) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            """
+            SELECT s.id FROM sessions s
+            LEFT JOIN (SELECT DISTINCT session_id FROM transcript_segments) t ON t.session_id = s.id
+            WHERE t.session_id IS NULL
+            ORDER BY s.started_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
+
+    def search_transcripts(
+        self,
+        *,
+        q: str,
+        limit: int,
+        project: str | None = None,
+        session_id: str | None = None,
+        roles: list[str] | None = None,
+    ) -> dict[str, Any]:
+        conds: list[str] = ["transcript_fts MATCH ?"]
+        params: list[Any] = [q]
+        if project:
+            conds.append("s.project_path = ?")
+            params.append(project)
+        if session_id:
+            conds.append("seg.session_id = ?")
+            params.append(session_id)
+        if roles:
+            conds.append(f"seg.role IN ({','.join('?' for _ in roles)})")
+            params.extend(roles)
+        where = "WHERE " + " AND ".join(conds)
+
+        sql = f"""
+            SELECT seg.uid, seg.session_id, seg.timestamp, seg.role, seg.text,
+                   snippet(transcript_fts, 0, '<mark>', '</mark>', '…', 16) AS snippet,
+                   s.project_path AS project_path
+            FROM transcript_fts
+            JOIN transcript_segments seg ON seg.rowid = transcript_fts.rowid
+            LEFT JOIN sessions s ON s.id = seg.session_id
+            {where}
+            ORDER BY bm25(transcript_fts)
+            LIMIT ?
+        """
+        count_sql = f"""
+            SELECT COUNT(*) AS n FROM transcript_fts
+            JOIN transcript_segments seg ON seg.rowid = transcript_fts.rowid
+            LEFT JOIN sessions s ON s.id = seg.session_id
+            {where}
+        """
+        rows = [dict(r) for r in self.db.execute(sql, (*params, limit)).fetchall()]
+        total_row = self.db.execute(count_sql, params).fetchone()
+        return {"total": total_row["n"] if total_row else 0, "rows": rows}
+
+    def segment_projects(self) -> list[str]:
+        rows = self.db.execute(
+            """
+            SELECT DISTINCT s.project_path
+            FROM transcript_segments seg
+            JOIN sessions s ON s.id = seg.session_id
+            WHERE s.project_path IS NOT NULL AND s.project_path <> ''
+            ORDER BY s.project_path
+            """
+        ).fetchall()
+        return [r["project_path"] for r in rows]
+
+    def segment_stats(self) -> dict[str, int]:
+        row = self.db.execute(
+            """
+            SELECT COUNT(*) AS total, COUNT(DISTINCT session_id) AS sessions
+            FROM transcript_segments
+            """
+        ).fetchone()
+        return {
+            "total": row["total"] if row else 0,
+            "sessions": row["sessions"] if row else 0,
+        }
+
+    def clear_all_segments(self) -> None:
+        self.db.execute("DELETE FROM transcript_segments")
+
+    def db_size_bytes(self) -> int:
+        """Sum of the main db + -wal + -shm files (or page_count * page_size for :memory:)."""
+        # sqlite3.Connection doesn't expose .name like better-sqlite3; we
+        # fetch the main file from PRAGMA database_list.
+        cur = self.db.execute("PRAGMA database_list")
+        path = None
+        for row in cur.fetchall():
+            if row["name"] == "main":
+                path = row["file"]
+                break
+        if not path:
+            row = self.db.execute(
+                """
+                SELECT (SELECT page_count FROM pragma_page_count()) *
+                       (SELECT page_size  FROM pragma_page_size()) AS bytes
+                """
+            ).fetchone()
+            return row["bytes"] if row else 0
+        total = 0
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                total += os.stat(path + suffix).st_size
+            except OSError:
+                pass
+        return total
+
+    def vacuum(self) -> None:
+        self.db.execute("VACUUM")
+        self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    # ─── App-meta-backed settings ──────────────────────────────────────
+
+    def is_search_indexing_enabled(self) -> bool:
+        row = self.db.execute(
+            "SELECT value FROM app_meta WHERE key = 'enable_transcript_search'"
+        ).fetchone()
+        if row:
+            return row["value"] == "1"
+        # Migration default: ON if segments already exist, OFF otherwise.
+        has_data = self.segment_stats()["total"] > 0
+        self.set_search_indexing_enabled(has_data)
+        return has_data
+
+    def set_search_indexing_enabled(self, enabled: bool) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('enable_transcript_search', ?)",
+            ("1" if enabled else "0",),
+        )
