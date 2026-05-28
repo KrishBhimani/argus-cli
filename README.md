@@ -26,7 +26,7 @@ ingest finishes (~5–10s for a typical install).
 
 | Page | What it answers |
 |---|---|
-| **Overview** | How many tokens have I burned? How much would I have paid on the API? Where does my spend land each day? |
+| **Overview** | How many tokens have I burned? How much would I have paid on the API? Where does my spend land each day? Plus a **"What needs attention"** card that surfaces detector findings (e.g. a tool whose error rate spiked this week). |
 | **Sessions** | Sortable table of every session — project, model, tokens, cost, duration. Click any row to drill in. |
 | **Tools** | Tool-call leaderboard (Bash vs Edit vs Read vs WebFetch…), error rates per tool, MCP server breakdown, sub-agent invocations. |
 | **Search** *(opt-in)* | Full-text search over every prompt you've typed AND every assistant response, your replies, and tool output. SQLite FTS5, sub-millisecond, no embeddings. |
@@ -37,16 +37,39 @@ ingest finishes (~5–10s for a typical install).
 ## CLI
 
 ```sh
-argus start [--port 4242] [--host 127.0.0.1]
-argus pricing refresh           # pull latest model prices from LiteLLM
-argus search status             # is transcript indexing on?
-argus search enable             # turn it on (next start backfills)
-argus search disable            # turn it off, keep data
-argus search clear              # wipe all indexed segments + disable
-argus wipe                      # delete ~/.argus/ entirely
+argus                                   # top-level command group
+├─ start [--port 4242] [--host 127.0.0.1] [--data-dir <path>]
+│                                       # watcher + ingester + dashboard server
+├─ pricing
+│  └─ refresh                           # pull latest model prices from LiteLLM
+├─ search
+│  ├─ status                            # is transcript indexing on?
+│  ├─ enable                            # turn it on (next start backfills)
+│  ├─ disable                           # turn it off, keep data
+│  └─ clear                             # wipe all indexed segments + disable
+├─ claude                               # scaffold & manage .claude/ setups
+│  ├─ init [path] [--template <name>] [--force]
+│  │                                    # stamp CLAUDE.md + .claude/ into a project
+│  └─ template
+│     ├─ list                           # list templates (bundled + user)
+│     └─ create <name> [--path <dir>] [--all]
+│                                       # save a project's .claude/ as a template
+└─ wipe                                 # delete ~/.argus/ entirely
 ```
 
-`argus start --help` for the full list.
+Run `--help` at any level for details — `argus --help`, `argus claude --help`,
+`argus claude template --help`.
+
+### `argus claude` — project scaffolding
+
+Set good agent config *before* you run, not just observe it after. `init`
+copies a template into a project: `CLAUDE.md` goes to the project root,
+everything else into `.claude/`. Existing files are skipped (use `--force`
+to overwrite) — but an existing `CLAUDE.md` is **never** overwritten, even
+with `--force`. The bundled `default` template ships a sensible
+`settings.json`, agents, commands, rules, and a placeholder skill. Save your
+own project's setup as a reusable template with `template create`; user
+templates live in `~/.argus/templates/` and take precedence over bundled ones.
 
 ## Privacy & security
 
@@ -76,8 +99,8 @@ For vulnerability reports, see [SECURITY.md](./SECURITY.md).
 
 ## How it works
 
-1. **Ingest.** A `chokidar` watcher tails every `~/.claude/projects/<project>/<session-id>.jsonl`
-   file. Lines are validated with `zod`, deduplicated by `message.id`,
+1. **Ingest.** A `watchdog` observer tails every `~/.claude/projects/<project>/<session-id>.jsonl`
+   file. Lines are validated with `pydantic`, deduplicated by `message.id`,
    and turned into normalized session/turn rows in SQLite (WAL mode).
 2. **Cost.** Per-turn cost comes from a bundled `pricing/<version>.json`
    table sourced from [LiteLLM](https://github.com/BerriAI/litellm).
@@ -91,8 +114,16 @@ For vulnerability reports, see [SECURITY.md](./SECURITY.md).
    one over assistant text + thinking blocks + user content + tool
    output (~30–60 MB for hundreds of sessions). Indexing happens
    incrementally during the normal ingest tick.
-5. **Dashboard.** Astro 5 + ECharts, statically built, served by `hono`.
-   No server-side rendering, no Node code in the browser.
+5. **Dashboard.** Astro 5 + ECharts, statically built, served by the
+   FastAPI app (uvicorn). No server-side rendering, no Node code in the browser.
+6. **Detection (alerts).** A lightweight scheduler thread runs registered
+   *detectors* on a fixed cadence. Each detector reads the DB and returns
+   findings; the scheduler is the sole writer, upserting them into an
+   `alerts` table — idempotent, with a `resolved_at` lifecycle so an issue
+   that recovers then recurs fires again instead of staying silent. The
+   Overview's "What needs attention" card reads these, and critical findings
+   raise a browser notification. The v1 detector flags tools whose error rate
+   spiked versus their preceding 4-week baseline.
 
 ## Configuration
 
@@ -133,7 +164,7 @@ set, Argus's own database keeps the data even after Claude rotates it out.
 git clone https://github.com/KrishBhimani/argus-cli.git
 cd argus-cli
 uv sync               # install deps + create venv
-uv run pytest         # ~120 tests, ~10s
+uv run pytest         # ~215 tests, ~20s
 uv run argus start    # dev — runs directly from source
 ```
 
@@ -147,12 +178,15 @@ python/argus/         Python ingest, store, server, CLI
   adapters/           Claude Code JSONL parsers + adapter registry
   store/              SQLite schema + migrations + repo
   server/             FastAPI app + /api routes
-  collector/          watcher + pipeline + first-run + search backfill
+  collector/          watcher + pipeline + first-run + search backfill + alert scheduler
+  detectors/          alert detectors (pure reads) + @register registry
+  scaffold/           `argus claude` template storage / init / snapshot
   pricing/            LiteLLM-derived price table + cost compute
   schema/             pydantic data models
 dashboard/            Astro source
 dashboard-dist/       Astro build output (shipped in wheel as data)
 pricing/              Bundled pricing JSON (shipped in wheel as data)
+templates/            Bundled .claude/ scaffolding templates (shipped in wheel as data)
 tests/                pytest suite, mirrors python/argus/ layout
 ```
 

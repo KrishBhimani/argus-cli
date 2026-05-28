@@ -69,6 +69,8 @@ heatmap, Trends line chart, "Last N days" totals.
   search indexes
 - `file_offsets` — per-file ingest cursor so we re-read only new bytes
 - `parse_errors` — surfaced on Settings → Parse errors
+- `alerts` — detector findings shown on the Overview "What needs
+  attention" card; written **only** by the alert scheduler (see below)
 - `app_meta` — schema version, search-indexing flag
 
 ## The write path (ingest)
@@ -124,6 +126,78 @@ The dashboard is **statically built**. No server-side rendering, no
 Node in the browser. Pages just `fetch('/api/...')` and render with
 ECharts.
 
+## Detection (alerts)
+
+Beyond passively charting history, Argus runs **detectors** that flag
+behavior worth your attention. The flow reuses ingest's separation of
+concerns — readers read, one writer writes:
+
+```
+python/argus/detectors/registry.py   @register + available_detectors()
+        │  each detector is pure: detect(repo, now_iso) reads, returns Findings
+        ▼
+python/argus/collector/scheduler.py  the ONLY writer of alerts; runs every
+        │                            detector on a fixed cadence in a thread
+        ▼
+~/.argus/argus.db  →  alerts table   upsert by (detector, dedup_key);
+        │                            idempotent, with a resolved_at lifecycle
+        ▼
+python/argus/server/api.py           GET /api/alerts, GET /api/alerts/unseen,
+        │                            POST /api/alerts/{id}/seen
+        ▼
+dashboard "What needs attention"     card (hidden when empty) + a browser
+                                     Notification on unseen critical findings
+```
+
+Rules that matter:
+
+- **Detectors are pure.** `detect(repo, now_iso)` reads the DB and returns
+  `Finding` objects — it never writes. The scheduler owns every write. That
+  boundary is what makes detectors trivially unit-testable.
+- **Idempotent upserts.** `upsert_alert` keys on `(detector, dedup_key)` with
+  `ON CONFLICT … DO UPDATE … RETURNING id`, so re-running a detector updates
+  the existing row instead of duplicating.
+- **`resolved_at` lifecycle.** Each tick the scheduler resolves alerts whose
+  `dedup_key` is no longer in the detector's current findings
+  (`resolve_stale_alerts`). If the issue recurs, the row un-resolves and its
+  `seen_at` clears — so a tool that recovers then re-spikes notifies again
+  rather than staying silent.
+- **Self-registration.** Detectors `@register` in their module, imported for
+  side-effect in `python/argus/detectors/__init__.py` — same pattern as
+  adapters. Adding one is a new file + the import line; no scheduler edits.
+
+The v1 detector (`tool_error_rate_spike`) compares each tool's last-7-day
+error rate against its preceding 4-week baseline and fires when the rate
+multiplies past a threshold — or breaks from a zero baseline. Cost was
+deliberately *not* the v1 signal: it's meaningless for Pro/Max users who
+don't pay per token.
+
+## Scaffolding (`argus claude`)
+
+Separate from ingest/serve: a file-copy tool that stamps a `.claude/` setup
+(and a root `CLAUDE.md`) into a project — proactive config *before* the agent
+runs, not just observation after. No DB, no daemon, no schema.
+
+```
+python/argus/scaffold/storage.py     resolve template names across two tiers
+python/argus/scaffold/scaffolder.py  init: copy a template dir → a project
+python/argus/scaffold/snapshot.py    create: snapshot a project's .claude/
+        │
+        ▼
+templates/<name>/                    bundled (read-only, shipped in the wheel)
+~/.argus/templates/<name>/           user templates (read-write)
+```
+
+- **Two tiers, user-first.** `resolve_template` checks `~/.argus/templates/`
+  then the bundled `templates/`. The bundled `default` ships in the wheel via
+  `force-include`, exactly like `pricing/` and `dashboard-dist/`.
+- **Pure file copy.** No templating or substitution in v1. `init` copies each
+  template file to its matching path in the project (`CLAUDE.md` → root,
+  everything else → `.claude/`).
+- **`CLAUDE.md` is never overwritten**, even with `--force` — it's the user's
+  project brain. `create` is scoped to `.claude/` and excludes session/cache
+  dirs from the snapshot.
+
 ## Conventions that matter
 
 A few patterns to absorb before adding code:
@@ -177,12 +251,14 @@ A few patterns to absorb before adding code:
 
 ```
 python/argus/
-  cli.py                    argus start / search / pricing / wipe (typer)
+  cli.py                    argus start / search / pricing / claude / wipe (typer)
   adapters/
     base.py                 Adapter protocol + ParseError
     registry.py             @register + available_adapters()
     claude_code/            JSONL parsers, discovery, history.jsonl
-  collector/                pipeline, watcher, first-run, backfills
+  collector/                pipeline, watcher, first-run, backfills, alert scheduler
+  detectors/                alert detectors (pure reads) + @register registry
+  scaffold/                 argus claude: template storage / init / snapshot
   pricing/                  LiteLLM-derived price table + cost compute
   store/                    SQLite repository + migrations
   server/                   FastAPI app (app.py) + routes (api.py)
@@ -197,8 +273,10 @@ dashboard/
 dashboard-dist/             built dashboard, shipped in the wheel as data
 
 pricing/                    bundled LiteLLM price tables (shipped in wheel as data)
+templates/                  bundled .claude/ scaffolding templates (shipped in wheel as data)
 tests/                      pytest suite, mirrors python/argus/ layout
 ~/.argus/argus.db           SQLite DB (created on first run)
+~/.argus/templates/         user-saved scaffolding templates (argus claude template create)
 ~/.claude/                  source data we read from
 ```
 
@@ -208,8 +286,9 @@ tests/                      pytest suite, mirrors python/argus/ layout
   index, BM25 ranking, sub-millisecond, fully offline.
 - **No external APIs** except the optional `argus pricing refresh`
   (single HTTP GET to LiteLLM's GitHub).
-- **No background workers or message queues.** It's just the file
-  watcher and an HTTP server.
+- **No message queues or external workers.** Concurrency is at most three
+  in-process threads: the file watcher, the HTTP server, and a lightweight
+  detector scheduler. No brokers, no cron, no separate processes.
 - **No auth.** Loopback binding is the security model — see
   [SECURITY.md](./SECURITY.md).
 
@@ -224,3 +303,5 @@ tests/                      pytest suite, mirrors python/argus/ layout
 | Tweak cost computation | `python/argus/pricing/compute.py`, then re-ingest to recompute via a backfill |
 | Add a new chart | `dashboard/src/scripts/charts.ts` (theme is shared) |
 | Add a new adapter (Codex, OpenClaw, Hermes, …) | New folder `python/argus/adapters/<agent>/` + `@register class` in `adapter.py`. No edits to CLI / watcher / pipeline / server. |
+| Add an alert detector | New file in `python/argus/detectors/` with a `@register` class whose pure `detect()` returns `Finding`s, plus the side-effect import in `detectors/__init__.py`. The scheduler picks it up automatically. |
+| Change the bundled scaffold template | Edit files under `templates/default/`; they're force-included into the wheel. New top-level dirs need a `force-include` entry in `pyproject.toml`. |

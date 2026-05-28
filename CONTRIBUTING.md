@@ -15,7 +15,7 @@ first** — it's a 5-minute tour of how the pieces fit together.
 git clone https://github.com/KrishBhimani/argus-cli.git
 cd argus-cli
 uv sync               # creates .venv and installs deps + dev tools
-uv run pytest         # ~120 tests, ~10s
+uv run pytest         # ~215 tests, ~20s
 uv run argus start    # fast iteration loop — runs directly from source
 ```
 
@@ -121,6 +121,16 @@ a new adapter (Codex, OpenClaw, Hermes, …), do not edit shared code
 to special-case it — express the per-agent behavior through the
 optional extension points (`extra_watch_paths`, `ingest_extra`,
 `sub_session_files_for`, `should_skip`, `normalize_model_name`).
+
+### Detectors and the alert scheduler
+
+Detectors (`python/argus/detectors/`) must stay **pure**: `detect()` reads
+the DB and returns `Finding`s, and that's it. The scheduler
+(`python/argus/collector/scheduler.py`) is the **only** thing that writes to
+the `alerts` table — don't blur that boundary by writing from a detector.
+Alerts are upserted on `(detector, dedup_key)` and reconciled each tick via
+`resolved_at`, so the key you choose for `dedup_key` *is* the identity of the
+thing being alerted on. See ARCHITECTURE.md → "Detection (alerts)".
 
 ### Security model
 

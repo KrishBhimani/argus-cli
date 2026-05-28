@@ -87,11 +87,15 @@ Things this codebase deliberately does to reduce attack surface:
 - CSRF Origin check on all non-GET API routes (FastAPI middleware in
   `python/argus/server/app.py`).
 - No build hooks running on user machines. The wheel ships pure Python
-  + bundled data (`dashboard-dist/` + `pricing/`). Installation runs
-  no arbitrary code.
+  + bundled data (`dashboard-dist/`, `pricing/`, `templates/`).
+  Installation runs no arbitrary code.
 - `pyproject.toml` `[tool.hatch.build.targets.wheel]` whitelist — only
-  `python/argus`, `dashboard-dist`, `pricing` ship. No source tests,
-  no docs, no `src/` legacy.
+  `python/argus`, `dashboard-dist`, `pricing`, and `templates` ship. No
+  source tests, no docs, no `src/` legacy.
+- `argus claude` scaffolding is a pure file copy — no templating,
+  substitution, or code execution. It writes only to the path you hand
+  `init` (created if absent) or under `~/.argus/templates/`, and never
+  overwrites an existing `CLAUDE.md`.
 
 If you spot a regression on any of the above, that's a real bug and
 worth reporting.
