@@ -266,3 +266,42 @@ th .est { color: var(--text-2); font-weight: 400; text-transform: none; letter-s
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* Alerts card */
+.alerts {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+.alert {
+  padding: 0.6rem 0.8rem;
+  border-left: 3px solid var(--text-2);
+  background: var(--bg-2);
+  border-radius: 4px;
+}
+.alert-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.alert p {
+  margin: 0.25rem 0;
+  color: var(--text-1);
+  font-size: 0.9rem;
+}
+.alert time {
+  color: var(--text-2);
+  font-size: 0.75rem;
+}
+.alert-severity {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+}
+.alert-info { border-left-color: var(--codex); }
+.alert-warning { border-left-color: var(--warn); }
+.alert-critical { border-left-color: var(--bad); }

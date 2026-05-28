@@ -156,3 +156,25 @@ CREATE TRIGGER IF NOT EXISTS segments_au AFTER UPDATE ON transcript_segments BEG
   INSERT INTO transcript_fts(rowid, text) VALUES (new.rowid, new.text);
 END;
 """
+
+MIGRATION_004 = """
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  detector TEXT NOT NULL,
+  dedup_key TEXT NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  seen_at TEXT,
+  UNIQUE (detector, dedup_key)
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_unseen ON alerts(seen_at, severity);
+CREATE INDEX IF NOT EXISTS idx_alerts_recent ON alerts(last_seen_at DESC);
+"""
+
+MIGRATION_005 = """
+ALTER TABLE alerts ADD COLUMN resolved_at TEXT;
+"""

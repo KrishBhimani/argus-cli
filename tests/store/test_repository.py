@@ -10,6 +10,7 @@ from argus.schema.types import (
     TranscriptSegment,
     Turn,
 )
+from tests.conftest import alert_factory, session_factory
 
 # Sample row shared across tests (matches the TS SESSION/TURN constants).
 SAMPLE = Session(
@@ -362,3 +363,159 @@ def test_clear_all_segments_wipes_table_and_fts(repo):
     assert repo.segment_stats()["total"] == 0
     r = repo.search_transcripts(q="hello", limit=10)
     assert r["total"] == 0
+
+
+# ─── Alerts ───────────────────────────────────────────────────────────
+
+
+def test_upsert_alert_inserts_new_row(repo):
+    rid = repo.upsert_alert(alert_factory())
+    assert isinstance(rid, int) and rid > 0
+    got = repo.list_alerts(limit=10)
+    assert len(got) == 1
+    assert got[0].detector == "tool_error_rate_spike"
+    assert got[0].dedup_key == "Bash"
+    assert got[0].seen_at is None
+    assert got[0].resolved_at is None
+
+
+def test_upsert_alert_is_idempotent_on_same_key(repo):
+    repo.upsert_alert(alert_factory(first_seen_at="2026-05-27T12:00:00Z",
+                                    last_seen_at="2026-05-27T12:00:00Z"))
+    repo.upsert_alert(
+        alert_factory(
+            first_seen_at="2026-05-28T09:00:00Z",  # ignored on conflict
+            last_seen_at="2026-05-27T13:00:00Z",
+            message="Last 7d: 18.0% over 130 calls. Prior 28d: 4.8% over 450 calls.",
+        )
+    )
+    got = repo.list_alerts(limit=10)
+    assert len(got) == 1
+    assert got[0].last_seen_at == "2026-05-27T13:00:00Z"
+    assert got[0].message == "Last 7d: 18.0% over 130 calls. Prior 28d: 4.8% over 450 calls."
+    assert got[0].first_seen_at == "2026-05-27T12:00:00Z"  # preserved from first insert
+
+
+def test_upsert_alert_preserves_seen_when_severity_unchanged(repo):
+    rid = repo.upsert_alert(alert_factory(severity="warning"))
+    repo.mark_alert_seen(rid)
+    repo.upsert_alert(alert_factory(severity="warning", last_seen_at="2026-05-26T14:00:00Z"))
+    got = repo.list_alerts(limit=10)
+    assert got[0].seen_at is not None
+
+
+def test_upsert_alert_resets_seen_on_severity_change(repo):
+    rid = repo.upsert_alert(alert_factory(severity="warning"))
+    repo.mark_alert_seen(rid)
+    repo.upsert_alert(alert_factory(severity="critical", last_seen_at="2026-05-26T14:00:00Z"))
+    got = repo.list_alerts(limit=10)
+    assert got[0].seen_at is None
+
+
+def test_list_unseen_alerts_filters_by_severity(repo):
+    repo.upsert_alert(alert_factory(dedup_key="d1", severity="warning"))
+    repo.upsert_alert(alert_factory(dedup_key="d2", severity="critical"))
+    unseen = repo.list_unseen_alerts(severity="critical")
+    assert [a.dedup_key for a in unseen] == ["d2"]
+
+
+def test_list_unseen_alerts_excludes_seen_rows(repo):
+    rid = repo.upsert_alert(alert_factory(dedup_key="d1", severity="critical"))
+    repo.mark_alert_seen(rid)
+    repo.upsert_alert(alert_factory(dedup_key="d2", severity="critical"))
+    unseen = repo.list_unseen_alerts(severity="critical")
+    assert [a.dedup_key for a in unseen] == ["d2"]
+
+
+def test_mark_alert_seen_returns_false_for_unknown_id(repo):
+    assert repo.mark_alert_seen(99999) is False
+
+
+def test_list_alerts_excludes_resolved_rows(repo):
+    repo.upsert_alert(alert_factory(dedup_key="Bash"))
+    repo.upsert_alert(alert_factory(dedup_key="Read"))
+    repo.resolve_stale_alerts(detector="tool_error_rate_spike", active_dedup_keys=["Bash"])
+    keys = {a.dedup_key for a in repo.list_alerts(limit=10)}
+    assert keys == {"Bash"}
+
+
+def test_list_unseen_excludes_resolved_rows(repo):
+    repo.upsert_alert(alert_factory(dedup_key="Bash", severity="critical"))
+    repo.upsert_alert(alert_factory(dedup_key="Read", severity="critical"))
+    repo.resolve_stale_alerts(detector="tool_error_rate_spike", active_dedup_keys=["Bash"])
+    keys = [a.dedup_key for a in repo.list_unseen_alerts(severity="critical")]
+    assert keys == ["Bash"]
+
+
+def test_resolve_stale_alerts_only_touches_named_detector(repo):
+    repo.upsert_alert(alert_factory(detector="tool_error_rate_spike", dedup_key="Bash"))
+    repo.upsert_alert(alert_factory(detector="some_other", dedup_key="X"))
+    repo.resolve_stale_alerts(detector="tool_error_rate_spike", active_dedup_keys=[])
+    by_detector = {a.detector: a for a in repo.list_alerts(limit=10)}
+    assert "tool_error_rate_spike" not in by_detector
+    assert "some_other" in by_detector
+
+
+def test_resolve_stale_alerts_returns_count(repo):
+    repo.upsert_alert(alert_factory(dedup_key="Bash"))
+    repo.upsert_alert(alert_factory(dedup_key="Read"))
+    n = repo.resolve_stale_alerts(detector="tool_error_rate_spike", active_dedup_keys=["Bash"])
+    assert n == 1
+
+
+def test_resolve_stale_alerts_with_empty_active_set_resolves_all(repo):
+    repo.upsert_alert(alert_factory(dedup_key="Bash"))
+    repo.upsert_alert(alert_factory(dedup_key="Read"))
+    n = repo.resolve_stale_alerts(detector="tool_error_rate_spike", active_dedup_keys=[])
+    assert n == 2
+    assert repo.list_alerts(limit=10) == []
+
+
+def test_upsert_clears_resolved_at_and_resets_seen_on_refire(repo):
+    rid = repo.upsert_alert(alert_factory(dedup_key="Bash", severity="warning"))
+    repo.mark_alert_seen(rid)
+    repo.resolve_stale_alerts(detector="tool_error_rate_spike", active_dedup_keys=[])
+    repo.upsert_alert(alert_factory(dedup_key="Bash", severity="warning",
+                                    last_seen_at="2026-05-28T10:00:00Z"))
+    rows = repo.list_alerts(limit=10)
+    assert len(rows) == 1
+    got = rows[0]
+    assert got.resolved_at is None
+    assert got.seen_at is None
+    assert got.severity == "warning"
+
+
+def test_upsert_preserves_seen_when_steady_state(repo):
+    rid = repo.upsert_alert(alert_factory(dedup_key="Bash", severity="warning"))
+    repo.mark_alert_seen(rid)
+    repo.upsert_alert(alert_factory(dedup_key="Bash", severity="warning",
+                                    last_seen_at="2026-05-28T10:00:00Z"))
+    assert repo.list_alerts(limit=10)[0].seen_at is not None
+
+
+def test_tool_call_stats_in_range_returns_per_tool_counts(repo):
+    from argus.schema.types import ToolCall
+
+    repo.upsert_session(session_factory("s1", "2026-05-20T00:00:00Z"))
+    repo.upsert_tool_calls([
+        ToolCall(id="t1", session_id="s1", turn_index=0, tool_name="Bash",
+                 is_error=0, input_size=0, subagent_type=None,
+                 timestamp="2026-05-21T00:00:00Z"),
+        ToolCall(id="t2", session_id="s1", turn_index=1, tool_name="Bash",
+                 is_error=1, input_size=0, subagent_type=None,
+                 timestamp="2026-05-21T01:00:00Z"),
+        ToolCall(id="t3", session_id="s1", turn_index=2, tool_name="Read",
+                 is_error=0, input_size=0, subagent_type=None,
+                 timestamp="2026-05-21T02:00:00Z"),
+        ToolCall(id="t4", session_id="s1", turn_index=3, tool_name="Bash",
+                 is_error=1, input_size=0, subagent_type=None,
+                 timestamp="2026-05-15T00:00:00Z"),  # outside range
+    ])
+    stats = repo.tool_call_stats_in_range(
+        start_iso="2026-05-20T00:00:00Z", end_iso="2026-05-22T00:00:00Z"
+    )
+    by_name = {r["tool_name"]: r for r in stats}
+    assert by_name["Bash"]["calls"] == 2
+    assert by_name["Bash"]["errors"] == 1
+    assert by_name["Read"]["calls"] == 1
+    assert by_name["Read"]["errors"] == 0

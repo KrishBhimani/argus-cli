@@ -94,3 +94,32 @@ def test_same_origin_post_is_allowed(repo, tmp_path: Path):
     )
     assert r.status_code == 200
     assert r.json() == {"enabled": False}
+
+
+def test_cross_origin_post_to_alerts_seen_is_rejected(repo, tmp_path: Path):
+    """POST /api/alerts/{id}/seen must enforce the same CSRF origin check."""
+    from tests.conftest import alert_factory
+
+    rid = repo.upsert_alert(alert_factory(severity="critical"))
+    dist = tmp_path / "dashboard-dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html/>", encoding="utf-8")
+    app = build_app(
+        repo,
+        ServerOpts(
+            pricing_table_version="v1",
+            ingest_status=lambda: IngestStatus(
+                foreground_complete=True, pending=0, processed=0, total=0
+            ),
+            dashboard_dir=dist,
+            port=0,
+            adapters=[],
+            pricing_table=PricingTable(version="v1", models={}),
+        ),
+    )
+    client = TestClient(app)
+    r = client.post(
+        f"/api/alerts/{rid}/seen",
+        headers={"origin": "http://evil.example.com"},
+    )
+    assert r.status_code == 403

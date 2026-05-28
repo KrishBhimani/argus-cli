@@ -62,6 +62,19 @@ export interface PromptHit {
   session_id: string | null;
 }
 
+export interface Alert {
+  id: number;
+  detector: string;
+  dedup_key: string;
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  message: string;
+  metadata: Record<string, unknown>;
+  first_seen_at: string;
+  last_seen_at: string;
+  seen_at: string | null;
+}
+
 export const api = {
   sessions: (q = '') => fetch('/api/sessions' + q).then(r => r.json() as Promise<{ sessions: Session[] }>),
   session: (id: string) => fetch('/api/sessions/' + encodeURIComponent(id)).then(r => r.ok ? r.json() as Promise<{ session: Session; turns: Turn[] }> : null),
@@ -125,4 +138,15 @@ export const api = {
     freed_bytes: number;
     db_size_bytes: number;
   }>),
+  alerts: (limit = 50) =>
+    fetch('/api/alerts?limit=' + limit).then(r => r.json() as Promise<{ alerts: Alert[] }>),
+  unseenAlerts: (severity?: 'info' | 'warning' | 'critical') => {
+    const sp = new URLSearchParams();
+    if (severity) sp.set('severity', severity);
+    const q = sp.toString();
+    return fetch('/api/alerts/unseen' + (q ? '?' + q : ''))
+      .then(r => r.json() as Promise<{ alerts: Alert[] }>);
+  },
+  markAlertSeen: (id: number) =>
+    fetch(`/api/alerts/${id}/seen`, { method: 'POST' }).then(r => r.json()),
 };

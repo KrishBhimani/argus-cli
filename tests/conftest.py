@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from argus.schema.types import Session, Turn
+from argus.schema.types import Alert, Session, Turn
 from argus.store.db import open_db
 from argus.store.repository import Repository
 
@@ -151,4 +151,38 @@ def turn_factory(
         tool_calls_count=0,
         cost_usd=cost,
         metadata={},
+    )
+
+
+def alert_factory(
+    *,
+    detector: str = "tool_error_rate_spike",
+    dedup_key: str = "Bash",
+    severity: str = "warning",
+    title: str = "Bash error rate jumped to 11.6% this week (baseline 4.8%)",
+    message: str = "Last 7d: 11.6% over 120 calls. Prior 28d: 4.8% over 450 calls.",
+    metadata: dict | None = None,
+    first_seen_at: str = "2026-05-27T12:00:00Z",
+    last_seen_at: str = "2026-05-27T12:00:00Z",
+    seen_at: str | None = None,
+    resolved_at: str | None = None,
+) -> Alert:
+    return Alert(
+        detector=detector,
+        dedup_key=dedup_key,
+        severity=severity,
+        title=title,
+        message=message,
+        metadata=metadata
+        or {
+            "window_rate": 0.116,
+            "baseline_rate": 0.048,
+            "window_calls": 120,
+            "baseline_calls": 450,
+            "multiple": 2.42,
+        },
+        first_seen_at=first_seen_at,
+        last_seen_at=last_seen_at,
+        seen_at=seen_at,
+        resolved_at=resolved_at,
     )

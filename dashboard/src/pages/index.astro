@@ -23,6 +23,11 @@ import Default from '../layouts/Default.astro';
     </p>
   </section>
 
+  <div class="card" id="alerts-card" style="display:none; margin-bottom:1.2rem;">
+    <h3>What needs attention</h3>
+    <div id="alerts-body"></div>
+  </div>
+
   <div class="card" style="margin-bottom:1.2rem;">
     <h3>Cost over time</h3>
     <div id="line" class="chart"></div>
@@ -48,6 +53,7 @@ import Default from '../layouts/Default.astro';
     import { api } from '../scripts/api';
     import { usd, tok, num, shortDate, shortPath, escapeHtml } from '../scripts/format';
     import { lineCost, calendarHeatmap, modelMix } from '../scripts/charts';
+    import { renderAlertCard, startNotificationPoll } from '../scripts/alerts';
 
     const $ = (s: string) => document.querySelector(s) as HTMLElement;
     const sel = $('#window') as HTMLSelectElement;
@@ -117,5 +123,9 @@ import Default from '../layouts/Default.astro';
     sel.addEventListener('change', refresh);
     refresh();
     window.addEventListener('resize', () => [lineChart, heatChart, modelsChart].forEach(c => c?.resize()));
+
+    const alertsBody = $('#alerts-body');
+    renderAlertCard(alertsBody);
+    startNotificationPoll(alertsBody);
   </script>
 </Default>

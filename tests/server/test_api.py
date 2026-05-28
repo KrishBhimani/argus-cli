@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from argus.collector.first_run import IngestStatus
 from argus.pricing.types import PricingTable
 from argus.server.api import ApiDeps, build_api
-from tests.conftest import session_factory, turn_factory
+from tests.conftest import alert_factory, session_factory, turn_factory
 
 
 def _make_app(repo) -> FastAPI:
@@ -185,3 +185,49 @@ def test_export_csv_returns_csv_content_type(api_client):
 def test_parse_errors_returns_array(api_client):
     r = api_client.get("/api/parse-errors")
     assert isinstance(r.json()["errors"], list)
+
+
+# ─── Alerts ───────────────────────────────────────────────────────────
+
+
+def test_alerts_list_returns_empty_when_no_rows(api_client):
+    r = api_client.get("/api/alerts")
+    assert r.status_code == 200
+    assert r.json() == {"alerts": []}
+
+
+def test_alerts_list_returns_rows(api_client, repo):
+    repo.upsert_alert(alert_factory(dedup_key="d1", severity="warning"))
+    repo.upsert_alert(alert_factory(dedup_key="d2", severity="critical"))
+    r = api_client.get("/api/alerts")
+    assert r.status_code == 200
+    body = r.json()
+    assert {a["dedup_key"] for a in body["alerts"]} == {"d1", "d2"}
+
+
+def test_alerts_unseen_filters_by_severity(api_client, repo):
+    repo.upsert_alert(alert_factory(dedup_key="d1", severity="warning"))
+    repo.upsert_alert(alert_factory(dedup_key="d2", severity="critical"))
+    r = api_client.get("/api/alerts/unseen?severity=critical")
+    assert r.status_code == 200
+    body = r.json()
+    assert [a["dedup_key"] for a in body["alerts"]] == ["d2"]
+
+
+def test_alerts_unseen_rejects_bad_severity(api_client):
+    r = api_client.get("/api/alerts/unseen?severity=fatal")
+    assert r.status_code == 400
+
+
+def test_mark_alert_seen_marks_seen(api_client, repo):
+    rid = repo.upsert_alert(alert_factory(severity="critical"))
+    r = api_client.post(f"/api/alerts/{rid}/seen")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    r2 = api_client.get("/api/alerts/unseen?severity=critical")
+    assert r2.json() == {"alerts": []}
+
+
+def test_mark_alert_seen_404_for_unknown_id(api_client):
+    r = api_client.post("/api/alerts/99999/seen")
+    assert r.status_code == 404

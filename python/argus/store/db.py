@@ -8,9 +8,15 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from .migrations.inline import MIGRATION_001, MIGRATION_002, MIGRATION_003
+from .migrations.inline import (
+    MIGRATION_001,
+    MIGRATION_002,
+    MIGRATION_003,
+    MIGRATION_004,
+    MIGRATION_005,
+)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 
 class FTS5NotAvailableError(RuntimeError):
@@ -39,10 +45,24 @@ def open_db(path: str | Path) -> sqlite3.Connection:
     p.parent.mkdir(parents=True, exist_ok=True)
 
     # check_same_thread=False because the Repository may be accessed from
-    # the request thread, the watcher thread, and the first-run worker.
-    # SQLite itself is thread-safe in serialized mode; better-sqlite3 in TS
-    # makes the same assumption.
-    conn = sqlite3.connect(str(p), check_same_thread=False, isolation_level=None)
+    # the request thread, the watcher thread, the first-run worker, and
+    # the scheduler thread. SQLite itself is thread-safe in serialized
+    # mode; better-sqlite3 in TS makes the same assumption.
+    #
+    # cached_statements=0 disables Python sqlite3's per-Connection
+    # prepared-statement cache. With the cache enabled, two threads that
+    # call execute(SAME_SQL, ...) concurrently can both pull the cached
+    # sqlite3_stmt*, both call reset+bind on it, and one loses with
+    # SQLITE_MISUSE ("bad parameter or other API misuse"). The cost of
+    # disabling the cache is ~10µs of statement prep per query, which is
+    # well below the cost of the queries themselves. SQLite's own internal
+    # compilation cache (sqlite3_prepare_v2 fast path) still applies.
+    conn = sqlite3.connect(
+        str(p),
+        check_same_thread=False,
+        isolation_level=None,
+        cached_statements=0,
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
@@ -68,6 +88,12 @@ def open_db(path: str | Path) -> sqlite3.Connection:
     if current < 3:
         conn.executescript(MIGRATION_003)
         current = 3
+    if current < 4:
+        conn.executescript(MIGRATION_004)
+        current = 4
+    if current < 5:
+        conn.executescript(MIGRATION_005)
+        current = 5
 
     conn.execute(
         "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('schema_version', ?)",

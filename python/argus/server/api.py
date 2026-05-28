@@ -306,6 +306,24 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             "subagents": subagents,
         }
 
+    @api.get("/api/alerts")
+    def list_alerts(limit: int = 50) -> dict[str, Any]:
+        alerts = repo.list_alerts(limit=min(limit, 200))
+        return {"alerts": [a.model_dump() for a in alerts]}
+
+    @api.get("/api/alerts/unseen")
+    def list_unseen_alerts(severity: str | None = None) -> dict[str, Any]:
+        if severity is not None and severity not in ("info", "warning", "critical"):
+            raise HTTPException(status_code=400, detail="invalid severity")
+        alerts = repo.list_unseen_alerts(severity=severity)
+        return {"alerts": [a.model_dump() for a in alerts]}
+
+    @api.post("/api/alerts/{alert_id}/seen")
+    def mark_alert_seen(alert_id: int) -> dict[str, Any]:
+        if not repo.mark_alert_seen(alert_id):
+            raise HTTPException(status_code=404, detail="not found")
+        return {"ok": True}
+
     @api.get("/api/prompts")
     def prompts(
         q: str = "",

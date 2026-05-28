@@ -136,3 +136,22 @@ class TranscriptSegment(BaseModel):
     timestamp: str
     role: SegmentRole
     text: str
+
+
+AlertSeverity = Literal["info", "warning", "critical"]
+
+
+class Alert(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: int | None = None
+    detector: str
+    dedup_key: str
+    severity: AlertSeverity
+    title: str
+    message: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    first_seen_at: str
+    last_seen_at: str
+    seen_at: str | None = None
+    resolved_at: str | None = None

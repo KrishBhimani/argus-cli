@@ -10,9 +10,13 @@ from pathlib import Path
 
 import typer
 
+import argus.detectors  # noqa: F401  — triggers @register side-effects
+
 from .adapters.registry import available_adapters
 from .collector.first_run import run_first_pass_ingest
+from .collector.scheduler import start_scheduler
 from .collector.watcher import start_watcher
+from .detectors.registry import available_detectors
 from .pricing.load import load_pricing_table
 from .pricing.refresh import diff_pricing, fetch_litellm_table
 from .server.app import ServerOpts, build_app, serve_blocking
@@ -98,6 +102,10 @@ def start(
 
     watcher = start_watcher(adapters, repo, table)
 
+    detectors = available_detectors()
+    logger.info("Loaded %d detectors: %s", len(detectors), [d.name for d in detectors])
+    scheduler = start_scheduler(detectors, repo)
+
     dash_dir = _dashboard_dir()
     server_app = build_app(
         repo,
@@ -129,6 +137,7 @@ def start(
     except KeyboardInterrupt:
         pass
     finally:
+        scheduler.stop()
         watcher.stop()
         db.close()
         logger.info("Argus stopped.")

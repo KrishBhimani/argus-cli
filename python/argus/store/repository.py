@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ..schema.types import (
+    Alert,
     Prompt,
     Session,
     ToolCall,
@@ -67,6 +68,12 @@ def _row_to_turn(row: sqlite3.Row) -> Turn:
     d = dict(row)
     d["metadata"] = json.loads(d["metadata"])
     return Turn.model_validate(d)
+
+
+def _row_to_alert(row: sqlite3.Row) -> Alert:
+    d = dict(row)
+    d["metadata"] = json.loads(d["metadata"])
+    return Alert.model_validate(d)
 
 
 class Repository:
@@ -292,6 +299,22 @@ class Repository:
             {"name": r["name"], "calls": r["calls"], "errors": r["errors"] or 0}
             for r in rows
         ]
+
+    def tool_call_stats_in_range(
+        self, *, start_iso: str, end_iso: str
+    ) -> list[dict[str, Any]]:
+        """Per-tool ``(calls, errors)`` over a half-open ``[start, end)`` window."""
+        rows = self.db.execute(
+            """
+            SELECT tool_name, COUNT(*) AS calls,
+                   COALESCE(SUM(is_error), 0) AS errors
+            FROM tool_calls
+            WHERE timestamp >= ? AND timestamp < ?
+            GROUP BY tool_name
+            """,
+            (start_iso, end_iso),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def tool_calls_total(self, cutoff_iso: str) -> dict[str, int]:
         row = self.db.execute(
@@ -625,6 +648,115 @@ class Repository:
     def vacuum(self) -> None:
         self.db.execute("VACUUM")
         self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    # ─── Alerts ────────────────────────────────────────────────────────
+
+    def upsert_alert(self, a: Alert) -> int:
+        """Insert or update an alert keyed on (detector, dedup_key).
+
+        Same-severity upserts keep ``first_seen_at`` and ``seen_at`` as-is.
+        Severity changes reset ``seen_at`` to NULL so the dashboard re-pings
+        a state that has escalated (e.g., warning → critical).
+
+        Single statement with ``RETURNING id`` so there's no transaction
+        wrapper, no implicit cursor reuse, and no second round trip — the
+        whole thing is one prepared statement we can run from any thread.
+        """
+        params = {
+            "detector": a.detector,
+            "dedup_key": a.dedup_key,
+            "severity": a.severity,
+            "title": a.title,
+            "message": a.message,
+            "metadata": json.dumps(a.metadata),
+            "first_seen_at": a.first_seen_at,
+            "last_seen_at": a.last_seen_at,
+        }
+        cur = self.db.execute(
+            """
+            INSERT INTO alerts (detector, dedup_key, severity, title, message, metadata,
+                                first_seen_at, last_seen_at)
+            VALUES (:detector, :dedup_key, :severity, :title, :message, :metadata,
+                    :first_seen_at, :last_seen_at)
+            ON CONFLICT(detector, dedup_key) DO UPDATE SET
+              title = excluded.title,
+              message = excluded.message,
+              metadata = excluded.metadata,
+              last_seen_at = excluded.last_seen_at,
+              seen_at = CASE
+                WHEN resolved_at IS NOT NULL THEN NULL
+                WHEN severity = excluded.severity THEN seen_at
+                ELSE NULL
+              END,
+              resolved_at = NULL,
+              severity = excluded.severity
+            RETURNING id
+            """,
+            params,
+        )
+        row = cur.fetchone()
+        return int(row["id"])
+
+    def list_alerts(self, *, limit: int = 50) -> list[Alert]:
+        rows = self.db.execute(
+            "SELECT * FROM alerts WHERE resolved_at IS NULL "
+            "ORDER BY last_seen_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [_row_to_alert(r) for r in rows]
+
+    def list_unseen_alerts(self, *, severity: str | None = None) -> list[Alert]:
+        if severity:
+            rows = self.db.execute(
+                "SELECT * FROM alerts WHERE seen_at IS NULL AND resolved_at IS NULL "
+                "AND severity = ? ORDER BY last_seen_at DESC",
+                (severity,),
+            ).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM alerts WHERE seen_at IS NULL AND resolved_at IS NULL "
+                "ORDER BY last_seen_at DESC"
+            ).fetchall()
+        return [_row_to_alert(r) for r in rows]
+
+    def resolve_stale_alerts(
+        self, *, detector: str, active_dedup_keys: list[str]
+    ) -> int:
+        """Mark resolved_at = now() for unresolved alerts under ``detector``
+        whose dedup_key is NOT in ``active_dedup_keys``.
+
+        Empty ``active_dedup_keys`` resolves every unresolved row under that
+        detector — correct when a detector emitted no findings this tick.
+        """
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        if not active_dedup_keys:
+            cur = self.db.execute(
+                "UPDATE alerts SET resolved_at = ? "
+                "WHERE detector = ? AND resolved_at IS NULL",
+                (now, detector),
+            )
+        else:
+            placeholders = ",".join("?" * len(active_dedup_keys))
+            cur = self.db.execute(
+                f"UPDATE alerts SET resolved_at = ? "
+                f"WHERE detector = ? AND resolved_at IS NULL "
+                f"AND dedup_key NOT IN ({placeholders})",
+                (now, detector, *active_dedup_keys),
+            )
+        return cur.rowcount
+
+    def mark_alert_seen(self, alert_id: int) -> bool:
+        cur = self.db.execute(
+            "UPDATE alerts SET seen_at = ? WHERE id = ? AND seen_at IS NULL",
+            (datetime.now(timezone.utc).isoformat(), alert_id),
+        )
+        if cur.rowcount > 0:
+            return True
+        # Already-seen rows hit rowcount=0 but the row exists — treat as success.
+        row = self.db.execute(
+            "SELECT 1 FROM alerts WHERE id = ?", (alert_id,)
+        ).fetchone()
+        return row is not None
 
     # ─── App-meta-backed settings ──────────────────────────────────────
 
