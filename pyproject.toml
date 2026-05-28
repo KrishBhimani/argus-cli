@@ -60,6 +60,7 @@ packages = ["python/argus"]
 [tool.hatch.build.targets.wheel.force-include]
 "dashboard-dist" = "argus/dashboard-dist"
 "pricing" = "argus/pricing"
+"templates" = "argus/templates"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

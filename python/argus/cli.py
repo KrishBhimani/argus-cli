@@ -19,6 +19,9 @@ from .collector.watcher import start_watcher
 from .detectors.registry import available_detectors
 from .pricing.load import load_pricing_table
 from .pricing.refresh import diff_pricing, fetch_litellm_table
+from .scaffold.scaffolder import scaffold_project
+from .scaffold.snapshot import snapshot_candidates, snapshot_template
+from .scaffold.storage import RESERVED_TEMPLATE_NAMES, list_templates, resolve_template
 from .server.app import ServerOpts, build_app, serve_blocking
 from .store.db import open_db
 from .store.repository import Repository
@@ -29,6 +32,10 @@ pricing_app = typer.Typer(help="Pricing-table operations")
 search_app = typer.Typer(help="Manage transcript-search indexing")
 app.add_typer(pricing_app, name="pricing")
 app.add_typer(search_app, name="search")
+claude_app = typer.Typer(help="Scaffold and manage .claude/ project setups")
+template_app = typer.Typer(help="Manage scaffolding templates")
+claude_app.add_typer(template_app, name="template")
+app.add_typer(claude_app, name="claude")
 
 
 def _setup_logging(quiet: bool = False, verbose: bool = False) -> None:
@@ -253,6 +260,106 @@ def search_clear(
 
     typer.echo(f"Deleted {segs['total']:,} segments.")
     typer.echo(f"Freed {fmt(freed)} on disk (DB now {fmt(after_bytes)}).")
+
+
+def _render_tree(paths: list[Path], root: Path) -> str:
+    rels = sorted(p.relative_to(root).as_posix() for p in paths)
+    seen: set[str] = set()
+    lines: list[str] = []
+    for r in rels:
+        parts = r.split("/")
+        for depth, part in enumerate(parts):
+            prefix = "/".join(parts[: depth + 1])
+            if prefix in seen:
+                continue
+            seen.add(prefix)
+            is_dir = depth < len(parts) - 1
+            lines.append("  " * depth + part + ("/" if is_dir else ""))
+    return "\n".join(lines)
+
+
+@claude_app.command("init")
+def claude_init(
+    path: Path = typer.Argument(Path("."), help="Target project directory"),
+    template: str = typer.Option("default", "--template", help="Template name"),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite existing files (never CLAUDE.md)"
+    ),
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Scaffold a .claude/ setup (and CLAUDE.md) into a project."""
+    try:
+        template_dir = resolve_template(template, data_dir)
+    except KeyError:
+        avail = ", ".join(list_templates(data_dir)) or "(none)"
+        typer.echo(f"Unknown template '{template}'. Available: {avail}", err=True)
+        raise typer.Exit(code=1)
+
+    dest = path.resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    result = scaffold_project(template_dir, dest, force=force)
+
+    for p in result.created:
+        typer.echo(f"  + {p.relative_to(dest).as_posix()}")
+    for p, reason in result.skipped:
+        typer.echo(f"  - {p.relative_to(dest).as_posix()}  ({reason})")
+
+    touched = result.created + [p for p, _ in result.skipped]
+    if touched:
+        typer.echo("\nResulting layout:")
+        typer.echo(_render_tree(touched, dest))
+    typer.echo(f"\nScaffolded '{template}' into {dest}")
+    typer.echo(f"{len(result.created)} created, {len(result.skipped)} skipped.")
+
+
+@template_app.command("list")
+def template_list(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """List available template names (user templates shadow bundled)."""
+    names = list_templates(data_dir)
+    if not names:
+        typer.echo("No templates found.")
+        return
+    for n in names:
+        typer.echo(n)
+
+
+@template_app.command("create")
+def template_create(
+    name: str = typer.Argument(..., help="Template name to create"),
+    path: Path = typer.Option(Path("."), "--path", help="Project dir to snapshot"),
+    all_subdirs: bool = typer.Option(
+        False, "--all", help="Include every subfolder without prompting"
+    ),
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Snapshot the current project's .claude/ into a reusable user template."""
+    if name in RESERVED_TEMPLATE_NAMES:
+        typer.echo(f"'{name}' is reserved, pick another name", err=True)
+        raise typer.Exit(code=1)
+
+    project = path.resolve()
+    if not (project / ".claude").is_dir():
+        typer.echo(f"No .claude/ directory found in {project}", err=True)
+        raise typer.Exit(code=1)
+
+    candidates = snapshot_candidates(project)
+    if all_subdirs:
+        included = candidates
+    else:
+        included = [
+            d for d in candidates if typer.confirm(f"Include {d}/?", default=True)
+        ]
+
+    try:
+        target = snapshot_template(
+            project, name, data_dir, include_subdirs=included
+        )
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"Created template '{name}' at {target}")
 
 
 @app.command()
