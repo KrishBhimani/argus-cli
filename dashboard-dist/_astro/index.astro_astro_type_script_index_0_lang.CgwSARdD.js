@@ -1,4 +1,4 @@
-import{a as c,e as d,t as w,u as m,n as L,s as N,c as k}from"./format.CTtdBYgf.js";import{l as C,c as A,m as S}from"./charts.CtonQSNy.js";import"./installCanvasRenderer.4JmZ8sp0.js";const j=3e4;async function v(n){const t=n.closest(".card");let a=[];try{a=(await c.alerts(20)).alerts}catch{t&&(t.style.display="none");return}if(a.length===0){t&&(t.style.display="none");return}t&&(t.style.display=""),n.innerHTML=`<ul class="alerts">${a.map(o=>`
+import{a as c,e as d,t as w,u as m,n as L,s as N,b as k}from"./format.DxC1NGYT.js";import{l as C,c as A,m as S}from"./charts.BIevw6Es.js";const j=3e4;async function v(n){const t=n.closest(".card");let a=[];try{a=(await c.alerts(20)).alerts}catch{t&&(t.style.display="none");return}if(a.length===0){t&&(t.style.display="none");return}t&&(t.style.display=""),n.innerHTML=`<ul class="alerts">${a.map(o=>`
     <li class="alert alert-${o.severity}">
       <div class="alert-head">
         <strong>${d(o.title)}</strong>

@@ -11,7 +11,7 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
-    "astro": "^5.18.1",
+    "astro": "^6.4.2",
     "echarts": "^6.0.0",
     "typescript": "^5.9.3"
   }
