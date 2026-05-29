@@ -27,7 +27,7 @@ telemetry. No LLM calls. Everything stays on your machine.
 
 The backend is Python (≥3.11, FastAPI + uvicorn + pydantic + watchdog
 + stdlib sqlite3 + typer). The dashboard is Astro + ECharts, statically
-built. Both ship together in the `argus-cli` wheel on PyPI.
+built. Both ship together in the `argus-code` wheel on PyPI.
 
 ## The data layer
 

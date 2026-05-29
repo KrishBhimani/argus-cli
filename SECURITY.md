@@ -5,7 +5,7 @@
 If you find a security issue in Argus, please **don't open a public
 GitHub issue**. Instead, one of:
 
-- Open a private [GitHub Security Advisory](https://github.com/KrishBhimani/argus-cli/security/advisories/new) on the repository, or
+- Open a private [GitHub Security Advisory](https://github.com/KrishBhimani/argus-code/security/advisories/new) on the repository, or
 - Email the maintainer (see commit history for an address).
 
 I'll respond within a few days. Please include enough detail to

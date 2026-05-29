@@ -9,7 +9,7 @@ body:
         Thanks for taking the time to file a bug. The more specific you can
         be about what you ran and what you saw, the faster this gets fixed.
 
-        **For security issues**, please use [SECURITY.md](https://github.com/KrishBhimani/argus-cli/blob/main/SECURITY.md) instead of a public issue.
+        **For security issues**, please use [SECURITY.md](https://github.com/KrishBhimani/argus-code/blob/main/SECURITY.md) instead of a public issue.
 
   - type: textarea
     id: description
@@ -46,14 +46,14 @@ body:
       description: |
         Please include:
         - OS (Windows / macOS / Linux + version)
-        - Node version (`node --version`)
+        - Python version (`python --version`)
         - Argus version (`argus --version`)
-        - How you installed it (npm install -g, git clone, etc.)
+        - How you installed it (pipx, uv tool, git clone, etc.)
       placeholder: |
         OS: macOS 14.5
-        Node: v22.5.0
-        Argus: 0.1.0
-        Install: npm install -g argus-cli
+        Python: 3.12.4
+        Argus: 0.2.0
+        Install: pipx install argus-code
       render: markdown
     validations:
       required: true

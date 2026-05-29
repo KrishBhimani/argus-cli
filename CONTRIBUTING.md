@@ -12,8 +12,8 @@ first** — it's a 5-minute tour of how the pieces fit together.
 ## Quick start
 
 ```sh
-git clone https://github.com/KrishBhimani/argus-cli.git
-cd argus-cli
+git clone https://github.com/KrishBhimani/argus-code.git
+cd argus-code
 uv sync               # creates .venv and installs deps + dev tools
 uv run pytest         # ~215 tests, ~20s
 uv run argus start    # fast iteration loop — runs directly from source

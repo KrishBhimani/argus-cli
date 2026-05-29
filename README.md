@@ -15,7 +15,7 @@ Everything stays on your machine. No telemetry, no API calls, no
 embeddings — just SQLite and a static web UI.
 
 ```sh
-pipx install argus-cli     # or:  uv tool install argus-cli
+pipx install argus-code     # or:  uv tool install argus-code
 argus start
 ```
 
@@ -161,8 +161,8 @@ set, Argus's own database keeps the data even after Claude rotates it out.
 ## Development
 
 ```sh
-git clone https://github.com/KrishBhimani/argus-cli.git
-cd argus-cli
+git clone https://github.com/KrishBhimani/argus-code.git
+cd argus-code
 uv sync               # install deps + create venv
 uv run pytest         # ~215 tests, ~20s
 uv run argus start    # dev — runs directly from source

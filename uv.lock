@@ -34,7 +34,7 @@ wheels = [
 ]
 
 [[package]]
-name = "argus-cli"
+name = "argus-code"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [

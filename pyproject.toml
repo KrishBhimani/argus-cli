@@ -1,5 +1,5 @@
 [project]
-name = "argus-cli"
+name = "argus-code"
 version = "0.2.0"
 description = "Local-first dashboard for Claude Code cost, token, tool-usage, and full-text search analytics"
 readme = "README.md"
@@ -35,9 +35,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/KrishBhimani/argus-cli"
-Repository = "https://github.com/KrishBhimani/argus-cli.git"
-Issues = "https://github.com/KrishBhimani/argus-cli/issues"
+Homepage = "https://github.com/KrishBhimani/argus-code"
+Repository = "https://github.com/KrishBhimani/argus-code.git"
+Issues = "https://github.com/KrishBhimani/argus-code/issues"
 
 [project.scripts]
 argus = "argus.cli:app"
