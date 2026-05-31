@@ -365,6 +365,26 @@ def test_clear_all_segments_wipes_table_and_fts(repo):
     assert r["total"] == 0
 
 
+def test_vacuum_succeeds_with_active_statement_on_shared_connection(repo, db):
+    """VACUUM must not fail when another statement is mid-flight on the shared
+    connection (watcher/scheduler/request threads all share one). Regression
+    for: clicking "Clear indexed data" while the watcher was ingesting raised
+    'cannot VACUUM - SQL statements in progress'.
+    """
+    repo.upsert_session(session_factory("a", "2026-01-01T00:00:00Z"))
+    repo.upsert_session(session_factory("b", "2026-02-01T00:00:00Z"))
+
+    # Leave an unfinalized cursor active on the shared connection — this is
+    # what makes a same-connection VACUUM raise.
+    cur = db.execute("SELECT * FROM sessions")
+    cur.fetchone()  # partially consumed → statement still in progress
+
+    repo.vacuum()  # must not raise
+
+    # The original cursor is unaffected.
+    assert cur.fetchone() is not None
+
+
 # ─── Alerts ───────────────────────────────────────────────────────────
 
 

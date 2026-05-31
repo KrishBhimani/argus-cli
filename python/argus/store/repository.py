@@ -646,8 +646,26 @@ class Repository:
         return total
 
     def vacuum(self) -> None:
-        self.db.execute("VACUUM")
-        self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        # VACUUM cannot run on a connection that has any statement or
+        # transaction in progress — and this connection is shared across the
+        # watcher, scheduler, and request threads, so something is often
+        # mid-flight. Run it on a dedicated short-lived connection to the same
+        # file instead (busy_timeout covers cross-connection write locks).
+        cur = self.db.execute("PRAGMA database_list")
+        path = None
+        for row in cur.fetchall():
+            if row["name"] == "main":
+                path = row["file"]
+                break
+        if not path:
+            return  # :memory: or unknown — nothing to reclaim on disk
+        conn = sqlite3.connect(path, isolation_level=None)
+        try:
+            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute("VACUUM")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            conn.close()
 
     # ─── Alerts ────────────────────────────────────────────────────────
 
