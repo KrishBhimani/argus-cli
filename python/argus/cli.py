@@ -31,6 +31,8 @@ claude_app = typer.Typer(help="Scaffold and manage .claude/ project setups")
 template_app = typer.Typer(help="Manage scaffolding templates")
 claude_app.add_typer(template_app, name="template")
 app.add_typer(claude_app, name="claude")
+daemon_app = typer.Typer(help="Background ingestion + detector daemon (argusd)")
+app.add_typer(daemon_app, name="daemon")
 
 
 def _setup_logging(quiet: bool = False, verbose: bool = False) -> None:
@@ -357,6 +359,132 @@ def wipe(
     if data_dir.exists():
         shutil.rmtree(data_dir)
     typer.echo(f"Deleted {data_dir}")
+
+
+@daemon_app.command("run", hidden=True)
+def daemon_run(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Blocking foreground daemon. Used by 'daemon start' and OS services."""
+    from .daemon.service import DaemonAlreadyRunning, run_foreground
+
+    try:
+        run_foreground(data_dir)
+    except DaemonAlreadyRunning as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1)
+
+
+@daemon_app.command("start")
+def daemon_start(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Start argusd in the background (detached) and write its PID file."""
+    from .daemon import pidfile
+    from .daemon.process import spawn_daemon, wait_for_pidfile
+
+    existing = pidfile.read(data_dir)
+    if existing is not None and pidfile.is_running(existing):
+        typer.echo(f"daemon already running, PID {existing}")
+        raise typer.Exit(code=0)
+    if existing is not None:
+        typer.echo(f"Clearing stale PID file (process {existing} gone).")
+        pidfile.remove(data_dir)
+
+    spawn_daemon(data_dir)
+    pid = wait_for_pidfile(data_dir)
+    if pid is None:
+        typer.echo(
+            "daemon did not start within timeout — check ~/.argus/argusd.log",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.echo(f"argusd started, PID {pid}")
+
+
+@daemon_app.command("stop")
+def daemon_stop(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Stop argusd gracefully (removes the PID file)."""
+    from .daemon.process import stop_daemon
+
+    if stop_daemon(data_dir):
+        typer.echo("argusd stopped.")
+    else:
+        typer.echo("argusd is not running.")
+
+
+@daemon_app.command("restart")
+def daemon_restart(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Stop then start argusd."""
+    from .daemon.process import spawn_daemon, stop_daemon, wait_for_pidfile
+
+    stop_daemon(data_dir)
+    spawn_daemon(data_dir)
+    pid = wait_for_pidfile(data_dir)
+    if pid is None:
+        typer.echo("daemon did not restart within timeout.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"argusd restarted, PID {pid}")
+
+
+@daemon_app.command("status")
+def daemon_status(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Report whether argusd is running, its PID, and uptime."""
+    import time as _time
+
+    from .daemon import pidfile
+    from .daemon.logging import log_path
+
+    pid = pidfile.read(data_dir)
+    if pid is None or not pidfile.is_running(pid):
+        if pid is not None:
+            typer.echo(f"argusd: not running (stale PID file for {pid}).")
+        else:
+            typer.echo("argusd: not running.")
+        raise typer.Exit(code=0)
+
+    try:
+        started = pidfile.path(data_dir).stat().st_mtime
+        uptime_s = max(0, int(_time.time() - started))
+        h, rem = divmod(uptime_s, 3600)
+        m, s = divmod(rem, 60)
+        uptime = f"{h}h{m:02d}m{s:02d}s"
+    except OSError:
+        uptime = "unknown"
+
+    typer.echo(f"argusd: running (PID {pid}, uptime {uptime}).")
+    typer.echo(f"Log: {log_path(data_dir)}")
+
+
+@daemon_app.command("logs")
+def daemon_logs(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+    lines: int = typer.Option(40, "-n", "--lines", help="Lines to show"),
+    follow: bool = typer.Option(False, "-f", "--follow", help="Follow new output"),
+) -> None:
+    """Tail ~/.argus/argusd.log (rotation-aware with --follow)."""
+    from .daemon.logging import follow as follow_log
+    from .daemon.logging import log_path, tail_lines
+
+    p = log_path(data_dir)
+    if not p.exists():
+        typer.echo(f"No log file yet at {p}.")
+        raise typer.Exit(code=0)
+
+    for line in tail_lines(p, lines):
+        typer.echo(line.rstrip("\n"))
+
+    if follow:
+        try:
+            follow_log(p, emit=lambda ln: typer.echo(ln))
+        except KeyboardInterrupt:
+            pass
 
 
 def main() -> None:
