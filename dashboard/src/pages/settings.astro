@@ -212,6 +212,17 @@ import Default from '../layouts/Default.astro';
         progress.style.display = 'none';
       }
 
+      // When yielded to a running argusd the API is read-only — write
+      // controls would 409. Show a note instead of buttons that fail.
+      let daemon = false;
+      try {
+        daemon = (await fetch('/api/ingest/status').then(r => r.json())).daemon === true;
+      } catch { /* leave daemon=false */ }
+      if (daemon) {
+        actions.innerHTML = `<span style="color:var(--text-2);font-size:0.82rem;">Read-only while <code>argusd</code> is running — manage indexing from the CLI (<code>argus search enable</code>) or stop the daemon with <code>argus daemon stop</code>.</span>`;
+        return;
+      }
+
       // Action buttons reflect current state. Buttons that are
       // pointless in the current state are simply omitted instead of
       // disabled — fewer affordances to mis-click.

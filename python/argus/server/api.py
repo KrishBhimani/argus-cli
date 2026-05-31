@@ -109,11 +109,29 @@ class ApiDeps:
     ingest_status: Callable[[], IngestStatus]
     adapters: list[Adapter]
     pricing_table: PricingTable
+    daemon: bool = False
 
 
 def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
     """Build the ``/api/*`` router."""
     api = APIRouter()
+
+    def _require_writable() -> None:
+        """Reject state-changing requests when the dashboard is read-only.
+
+        When yielded to a live argusd, the DB connection is opened mode=ro;
+        without this guard a write would surface as a 500 ("attempt to write
+        a readonly database"). Return a clean 409 instead.
+        """
+        if deps.daemon:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Argus is read-only because the argusd daemon is running. "
+                    "Manage indexing from the CLI (e.g. `argus search enable`) "
+                    "or stop the daemon with `argus daemon stop`."
+                ),
+            )
 
     @api.get("/api/sessions")
     def list_sessions(
@@ -147,6 +165,8 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
         total_tokens = 0
         by_day: dict[str, float] = {}
         cost_by_model: dict[str, float] = {}
+        tokens_by_day: dict[str, int] = {}
+        tokens_by_model: dict[str, int] = {}
         split: dict[str, dict[str, Any]] = {}
         sessions_per_agent: dict[str, set[str]] = {}
         active_sessions: set[str] = set()
@@ -158,6 +178,8 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             total_tokens += tokens
             by_day[r["day"]] = by_day.get(r["day"], 0.0) + r["cost"]
             cost_by_model[r["model"]] = cost_by_model.get(r["model"], 0.0) + r["cost"]
+            tokens_by_day[r["day"]] = tokens_by_day.get(r["day"], 0) + tokens
+            tokens_by_model[r["model"]] = tokens_by_model.get(r["model"], 0) + tokens
             active_sessions.add(r["session_id"])
             agent = session_meta.get(r["session_id"]).agent if r["session_id"] in session_meta else "unknown"
             split.setdefault(agent, {"cost": 0.0, "sessions": 0, "tokens": 0})
@@ -191,7 +213,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
                     "days_active": len(w["days"]),
                 }
             )
-        top_sessions.sort(key=lambda x: x["window_cost_usd"], reverse=True)
+        top_sessions.sort(key=lambda x: x["window_tokens"], reverse=True)
         top_sessions = top_sessions[:20]
 
         return {
@@ -202,6 +224,8 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             "agent_split": split,
             "cost_by_day": by_day,
             "cost_by_model": cost_by_model,
+            "tokens_by_day": tokens_by_day,
+            "tokens_by_model": tokens_by_model,
             "top_sessions": top_sessions,
         }
 
@@ -320,6 +344,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
 
     @api.post("/api/alerts/{alert_id}/seen")
     def mark_alert_seen(alert_id: int) -> dict[str, Any]:
+        _require_writable()
         if not repo.mark_alert_seen(alert_id):
             raise HTTPException(status_code=404, detail="not found")
         return {"ok": True}
@@ -450,7 +475,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
                     }
                 )
 
-        if q and transcript_roles:
+        if transcript_roles:
             try:
                 tr = repo.search_transcripts(
                     q=q.strip(), limit=limit, project=project, roles=transcript_roles
@@ -555,6 +580,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
 
     @api.post("/api/search-index/enable")
     def search_index_enable() -> dict[str, Any]:
+        _require_writable()
         repo.set_search_indexing_enabled(True)
         try:
             run_segment_backfill(deps.adapters, repo, deps.pricing_table)
@@ -574,11 +600,13 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
 
     @api.post("/api/search-index/disable")
     def search_index_disable() -> dict[str, Any]:
+        _require_writable()
         repo.set_search_indexing_enabled(False)
         return {"enabled": False}
 
     @api.post("/api/search-index/clear")
     def search_index_clear() -> dict[str, Any]:
+        _require_writable()
         before_bytes = repo.db_size_bytes()
         repo.clear_all_segments()
         repo.set_search_indexing_enabled(False)
@@ -605,6 +633,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             "processed": status.processed,
             "total": status.total,
             "sessionCount": session_count,
+            "daemon": deps.daemon,
         }
 
     @api.get("/api/pricing")

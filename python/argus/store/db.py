@@ -39,9 +39,32 @@ def _assert_fts5(conn: sqlite3.Connection) -> None:
         )
 
 
-def open_db(path: str | Path) -> sqlite3.Connection:
-    """Open the Argus SQLite DB at ``path``, applying migrations 1..N."""
+def open_db(path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
+    """Open the Argus SQLite DB at ``path``.
+
+    Read-write (default) applies migrations 1..N. Read-only opens with the
+    ``mode=ro`` URI (defense in depth — a bug in a read path cannot write
+    through the connection) and skips migrations and the WAL pragma: the
+    live writer that justifies read-only mode has already created and
+    migrated the schema, and journal mode cannot be set on a ro connection.
+    """
     p = Path(path)
+
+    if read_only:
+        uri = Path(p).resolve(strict=False).as_uri() + "?mode=ro"
+        conn = sqlite3.connect(
+            uri,
+            uri=True,
+            check_same_thread=False,
+            isolation_level=None,
+            cached_statements=0,
+        )
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        _assert_fts5(conn)
+        return conn
+
     p.parent.mkdir(parents=True, exist_ok=True)
 
     # check_same_thread=False because the Repository may be accessed from

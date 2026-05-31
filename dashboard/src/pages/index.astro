@@ -29,7 +29,7 @@ import Default from '../layouts/Default.astro';
   </div>
 
   <div class="card" style="margin-bottom:1.2rem;">
-    <h3>Cost over time</h3>
+    <h3>Tokens over time</h3>
     <div id="line" class="chart"></div>
   </div>
 
@@ -39,7 +39,7 @@ import Default from '../layouts/Default.astro';
       <div id="heatmap" class="chart"></div>
     </div>
     <div class="card">
-      <h3>Top models by cost (window)</h3>
+      <h3>Top models by tokens (window)</h3>
       <div id="models" class="chart"></div>
     </div>
   </div>
@@ -52,7 +52,7 @@ import Default from '../layouts/Default.astro';
   <script>
     import { api } from '../scripts/api';
     import { usd, tok, num, shortDate, shortPath, escapeHtml } from '../scripts/format';
-    import { lineCost, calendarHeatmap, modelMix } from '../scripts/charts';
+    import { lineTokens, calendarHeatmap, modelMix } from '../scripts/charts';
     import { renderAlertCard, startNotificationPoll } from '../scripts/alerts';
 
     const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -71,25 +71,23 @@ import Default from '../layouts/Default.astro';
       $('.hero-tokens')!.textContent = tok(overview.total_tokens);
       $('#hero-cost')!.textContent = usd(overview.total_cost_usd);
       $('#hero-sessions')!.textContent = num(overview.session_count);
-      const avg = overview.session_count ? overview.total_cost_usd / overview.session_count : 0;
-      $('#hero-avg')!.textContent = overview.session_count ? `· ~${usd(avg)} est/session` : '';
+      const avgTok = overview.session_count ? Math.round(overview.total_tokens / overview.session_count) : 0;
+      $('#hero-avg')!.textContent = overview.session_count ? `· ${tok(avgTok)} tok/session` : '';
 
-      const days = Object.entries(overview.cost_by_day).sort().map(([day, cost]) => ({ day, cost: cost as number }));
+      const days = Object.entries(overview.tokens_by_day).sort().map(([day, value]) => ({ day, value: value as number }));
       lineChart?.dispose();
-      if (days.length) lineChart = lineCost($('#line'), days);
-      else $('#line').innerHTML = '<p class="empty">No spend in this window.</p>';
+      if (days.length) lineChart = lineTokens($('#line'), days);
+      else $('#line').innerHTML = '<p class="empty">No activity in this window.</p>';
 
       const allOv = window === 'all' ? overview : await api.overview('all');
-      const allDays = Object.entries(allOv.cost_by_day).sort().map(([day, cost]) => ({ day, cost: cost as number }));
+      const allDays = Object.entries(allOv.tokens_by_day).sort().map(([day, value]) => ({ day, value: value as number }));
       heatChart?.dispose();
       heatChart = calendarHeatmap($('#heatmap'), allDays, 90);
 
-      // Models chart: read cost_by_model from /api/overview (window-bucketed).
-      // Previously summed s.total_cost_usd over inWindow sessions, which dumped
-      // a session's whole-lifetime cost onto whichever model was its primary_model.
-      const modelsList = Object.entries(overview.cost_by_model ?? {})
+      // Models chart: read tokens_by_model from /api/overview (window-bucketed).
+      const modelsList = Object.entries(overview.tokens_by_model ?? {})
         .sort((a, b) => (b[1] as number) - (a[1] as number))
-        .map(([name, cost]) => ({ name, cost: cost as number }));
+        .map(([name, value]) => ({ name, value: value as number }));
       modelsChart?.dispose();
       if (modelsList.length) modelsChart = modelMix($('#models'), modelsList);
       else $('#models').innerHTML = '<p class="empty">No data.</p>';

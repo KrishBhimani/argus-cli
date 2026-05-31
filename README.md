@@ -54,11 +54,68 @@ argus                                   # top-level command group
 │     ├─ list                           # list templates (bundled + user)
 │     └─ create <name> [--path <dir>] [--all]
 │                                       # save a project's .claude/ as a template
+├─ daemon                               # argusd — background ingestion + detectors
+│  ├─ start                             # start argusd detached, write PID file
+│  ├─ stop                              # stop argusd gracefully
+│  ├─ restart                           # stop then start
+│  ├─ status                            # running? PID + uptime
+│  └─ logs [-n N] [-f]                  # tail ~/.argus/argusd.log
 └─ wipe                                 # delete ~/.argus/ entirely
 ```
 
 Run `--help` at any level for details — `argus --help`, `argus claude --help`,
-`argus claude template --help`.
+`argus claude template --help`, `argus daemon --help`.
+
+### `argus daemon` — background daemon (argusd)
+
+By default the watcher and the detector scheduler run *inside* `argus start` —
+close the dashboard and ingestion stops. `argusd` moves that work into a
+long-running background process so your data stays fresh and detectors keep
+running whether or not the dashboard is open. It does **not** serve the
+dashboard (port 4242 is still only bound by `argus start`).
+
+```sh
+argus daemon start      # run argusd in the background
+argus daemon status     # PID + uptime
+argus daemon logs -f    # follow the log (survives rotation)
+argus daemon stop
+```
+
+> **Autostart at login is coming separately.** For now, start argusd yourself
+> with `argus daemon start` (it survives closing the terminal). OS-native
+> autostart (`argus install` / `argus uninstall`) lands in a follow-up.
+
+**Coexistence.** When argusd is running, `argus start` notices its PID file and
+becomes a **read-only dashboard** — it skips its own watcher/scheduler and just
+views the database the daemon keeps fresh (the footer shows *"Powered by
+argusd"*). When argusd is **not** running, `argus start` ingests in-process
+exactly as before, so users who never touch the daemon see no change.
+
+> **Known limitation (v1):** if argusd dies while a read-only dashboard is open,
+> the footer keeps showing *"Powered by argusd"* and ingestion pauses until you
+> restart the dashboard (which then resumes ingesting in-process). The dashboard
+> does not re-check daemon liveness on every poll.
+
+**Running it long-term.** argusd is designed to stay up. Its idle cost is
+negligible — the watcher is event-driven (sleeps until a `~/.claude` file
+changes) and the detector scheduler wakes once every 10 minutes; expect ~40–70
+MB RAM and effectively no idle CPU. The log is capped at ~4 MB (1 MB × 3
+rotations). A few habits worth knowing:
+
+- **Restart after upgrading argus.** A running daemon holds the old code in
+  memory — run `argus daemon restart` after `uv sync` / `pip install -U` to pick
+  up changes.
+- **No auto-restart yet.** A daemon started with `argus daemon start` that
+  crashes stays down until you start it again (the stale PID file is cleaned up
+  automatically). OS-supervised restart arrives with autostart in a follow-up.
+- **Windows stop is a hard kill.** `argus daemon stop` terminates the process
+  directly on Windows, so no `argusd stopped.` line is written to the log (the
+  CLI still prints it). This is safe — there's no critical in-memory state.
+- **Toggling search:** the dashboard's "Enable indexing" button indexes
+  immediately; the CLI `argus search enable` only flips the flag and defers the
+  backfill to the next `argus start` / `argus daemon restart`.
+
+Logs live at `~/.argus/argusd.log` (plain text, rotated at ~1 MB × 3).
 
 ### `argus claude` — project scaffolding
 
@@ -124,6 +181,12 @@ For vulnerability reports, see [SECURITY.md](./SECURITY.md).
    Overview's "What needs attention" card reads these, and critical findings
    raise a browser notification. The v1 detector flags tools whose error rate
    spiked versus their preceding 4-week baseline.
+7. **Shared runtime + daemon.** The watcher, scheduler, and first-pass ingest
+   are owned by a single `CoreRuntime` that both `argus start` and `argusd`
+   construct. The optional `argusd` daemon (`argus daemon`) runs that runtime in
+   its own process; a live daemon flips `argus start`
+   into a read-only viewer so the two never double-ingest. See **`argus
+   daemon`** above.
 
 ## Configuration
 
@@ -164,7 +227,7 @@ set, Argus's own database keeps the data even after Claude rotates it out.
 git clone https://github.com/KrishBhimani/argus-code.git
 cd argus-code
 uv sync               # install deps + create venv
-uv run pytest         # ~215 tests, ~20s
+uv run pytest         # ~245 tests, ~20s
 uv run argus start    # dev — runs directly from source
 ```
 
@@ -179,6 +242,8 @@ python/argus/         Python ingest, store, server, CLI
   store/              SQLite schema + migrations + repo
   server/             FastAPI app + /api routes
   collector/          watcher + pipeline + first-run + search backfill + alert scheduler
+  core/               CoreRuntime — shared watcher+scheduler+ingest lifecycle
+  daemon/             argusd: pidfile, foreground service, process control, logging
   detectors/          alert detectors (pure reads) + @register registry
   scaffold/           `argus claude` template storage / init / snapshot
   pricing/            LiteLLM-derived price table + cost compute

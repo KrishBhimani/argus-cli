@@ -12,11 +12,6 @@ import typer
 
 import argus.detectors  # noqa: F401  — triggers @register side-effects
 
-from .adapters.registry import available_adapters
-from .collector.first_run import run_first_pass_ingest
-from .collector.scheduler import start_scheduler
-from .collector.watcher import start_watcher
-from .detectors.registry import available_detectors
 from .pricing.load import load_pricing_table
 from .pricing.refresh import diff_pricing, fetch_litellm_table
 from .scaffold.scaffolder import scaffold_project
@@ -36,6 +31,8 @@ claude_app = typer.Typer(help="Scaffold and manage .claude/ project setups")
 template_app = typer.Typer(help="Manage scaffolding templates")
 claude_app.add_typer(template_app, name="template")
 app.add_typer(claude_app, name="claude")
+daemon_app = typer.Typer(help="Background ingestion + detector daemon (argusd)")
+app.add_typer(daemon_app, name="daemon")
 
 
 def _setup_logging(quiet: bool = False, verbose: bool = False) -> None:
@@ -81,49 +78,39 @@ def start(
     """Start the watcher, ingester, and dashboard server."""
     _setup_logging(quiet=quiet, verbose=verbose)
 
-    db = open_db(data_dir / "argus.db")
-    repo = Repository(db)
+    from .core.runtime import CoreRuntime, NoAdaptersError
+    from .daemon import pidfile
 
-    adapters = available_adapters()
-    if not adapters:
-        typer.echo(
-            "No adapter data found. Argus expects ~/.claude/ (Claude Code) "
-            "to be present at minimum.",
-            err=True,
-        )
+    daemon_pid = pidfile.read(data_dir)
+    if daemon_pid is not None and pidfile.is_running(daemon_pid):
+        read_only = True
+        logger.info("argusd %d active — dashboard is read-only.", daemon_pid)
+    else:
+        read_only = False
+        if daemon_pid is not None:
+            logger.info(
+                "Stale argusd PID file (process %d gone) — ignoring.", daemon_pid
+            )
+
+    runtime = CoreRuntime(data_dir, read_only=read_only)
+    try:
+        runtime.start()
+    except NoAdaptersError as e:
+        typer.echo(str(e), err=True)
         raise typer.Exit(code=1)
-
-    names = ", ".join(a.agent for a in adapters)
-    logger.info("Detected adapters: %s", names)
-
-    table = load_pricing_table()
-    logger.info("Argus: ingesting recent sessions...")
-    handle = run_first_pass_ingest(adapters, repo, table, recent_days=30)
-    handle.wait_foreground()
-    s = handle.status()
-    logger.info(
-        "Argus: foreground ingest complete (%d/%d files), starting watcher...",
-        s.processed,
-        s.total,
-    )
-
-    watcher = start_watcher(adapters, repo, table)
-
-    detectors = available_detectors()
-    logger.info("Loaded %d detectors: %s", len(detectors), [d.name for d in detectors])
-    scheduler = start_scheduler(detectors, repo)
 
     dash_dir = _dashboard_dir()
     server_app = build_app(
-        repo,
+        runtime.repo,
         ServerOpts(
-            pricing_table_version=table.version,
-            ingest_status=handle.status,
+            pricing_table_version=runtime.pricing_table.version,
+            ingest_status=runtime.ingest_status,
             dashboard_dir=dash_dir,
             port=port,
             host=host,
-            adapters=adapters,
-            pricing_table=table,
+            adapters=runtime.adapters,
+            pricing_table=runtime.pricing_table,
+            daemon=read_only,
         ),
     )
     display_host = "localhost" if host in ("0.0.0.0", "::") else host
@@ -144,9 +131,7 @@ def start(
     except KeyboardInterrupt:
         pass
     finally:
-        scheduler.stop()
-        watcher.stop()
-        db.close()
+        runtime.stop()
         logger.info("Argus stopped.")
 
 
@@ -374,6 +359,132 @@ def wipe(
     if data_dir.exists():
         shutil.rmtree(data_dir)
     typer.echo(f"Deleted {data_dir}")
+
+
+@daemon_app.command("run", hidden=True)
+def daemon_run(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Blocking foreground daemon. Used by 'daemon start' and OS services."""
+    from .daemon.service import DaemonAlreadyRunning, run_foreground
+
+    try:
+        run_foreground(data_dir)
+    except DaemonAlreadyRunning as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1)
+
+
+@daemon_app.command("start")
+def daemon_start(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Start argusd in the background (detached) and write its PID file."""
+    from .daemon import pidfile
+    from .daemon.process import spawn_daemon, wait_for_pidfile
+
+    existing = pidfile.read(data_dir)
+    if existing is not None and pidfile.is_running(existing):
+        typer.echo(f"daemon already running, PID {existing}")
+        raise typer.Exit(code=0)
+    if existing is not None:
+        typer.echo(f"Clearing stale PID file (process {existing} gone).")
+        pidfile.remove(data_dir)
+
+    spawn_daemon(data_dir)
+    pid = wait_for_pidfile(data_dir)
+    if pid is None:
+        typer.echo(
+            "daemon did not start within timeout — check ~/.argus/argusd.log",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.echo(f"argusd started, PID {pid}")
+
+
+@daemon_app.command("stop")
+def daemon_stop(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Stop argusd gracefully (removes the PID file)."""
+    from .daemon.process import stop_daemon
+
+    if stop_daemon(data_dir):
+        typer.echo("argusd stopped.")
+    else:
+        typer.echo("argusd is not running.")
+
+
+@daemon_app.command("restart")
+def daemon_restart(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Stop then start argusd."""
+    from .daemon.process import spawn_daemon, stop_daemon, wait_for_pidfile
+
+    stop_daemon(data_dir)
+    spawn_daemon(data_dir)
+    pid = wait_for_pidfile(data_dir)
+    if pid is None:
+        typer.echo("daemon did not restart within timeout.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"argusd restarted, PID {pid}")
+
+
+@daemon_app.command("status")
+def daemon_status(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+) -> None:
+    """Report whether argusd is running, its PID, and uptime."""
+    import time as _time
+
+    from .daemon import pidfile
+    from .daemon.logging import log_path
+
+    pid = pidfile.read(data_dir)
+    if pid is None or not pidfile.is_running(pid):
+        if pid is not None:
+            typer.echo(f"argusd: not running (stale PID file for {pid}).")
+        else:
+            typer.echo("argusd: not running.")
+        raise typer.Exit(code=0)
+
+    try:
+        started = pidfile.path(data_dir).stat().st_mtime
+        uptime_s = max(0, int(_time.time() - started))
+        h, rem = divmod(uptime_s, 3600)
+        m, s = divmod(rem, 60)
+        uptime = f"{h}h{m:02d}m{s:02d}s"
+    except OSError:
+        uptime = "unknown"
+
+    typer.echo(f"argusd: running (PID {pid}, uptime {uptime}).")
+    typer.echo(f"Log: {log_path(data_dir)}")
+
+
+@daemon_app.command("logs")
+def daemon_logs(
+    data_dir: Path = typer.Option(_default_data_dir(), "--data-dir"),
+    lines: int = typer.Option(40, "-n", "--lines", help="Lines to show"),
+    follow: bool = typer.Option(False, "-f", "--follow", help="Follow new output"),
+) -> None:
+    """Tail ~/.argus/argusd.log (rotation-aware with --follow)."""
+    from .daemon.logging import follow as follow_log
+    from .daemon.logging import log_path, tail_lines
+
+    p = log_path(data_dir)
+    if not p.exists():
+        typer.echo(f"No log file yet at {p}.")
+        raise typer.Exit(code=0)
+
+    for line in tail_lines(p, lines):
+        typer.echo(line.rstrip("\n"))
+
+    if follow:
+        try:
+            follow_log(p, emit=lambda ln: typer.echo(ln))
+        except KeyboardInterrupt:
+            pass
 
 
 def main() -> None:
