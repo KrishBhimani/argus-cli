@@ -40,6 +40,28 @@ def test_ingest_status_includes_daemon_flag(repo):
     assert body["daemon"] is True
 
 
+def test_write_endpoints_blocked_in_read_only(repo):
+    """When yielded to argusd, write endpoints return 409 — never a 500."""
+    client = TestClient(_make_app(repo, daemon=True))
+    for path in (
+        "/api/search-index/enable",
+        "/api/search-index/disable",
+        "/api/search-index/clear",
+    ):
+        r = client.post(path)
+        assert r.status_code == 409, path
+        assert "read-only" in r.json()["detail"].lower()
+    r = client.post("/api/alerts/1/seen")
+    assert r.status_code == 409
+
+
+def test_write_endpoints_work_when_not_read_only(repo):
+    client = TestClient(_make_app(repo))  # daemon=False
+    r = client.post("/api/search-index/disable")
+    assert r.status_code == 200
+    assert r.json()["enabled"] is False
+
+
 @pytest.fixture
 def api_client(repo):
     return TestClient(_make_app(repo))

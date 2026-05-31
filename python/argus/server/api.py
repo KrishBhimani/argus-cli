@@ -116,6 +116,23 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
     """Build the ``/api/*`` router."""
     api = APIRouter()
 
+    def _require_writable() -> None:
+        """Reject state-changing requests when the dashboard is read-only.
+
+        When yielded to a live argusd, the DB connection is opened mode=ro;
+        without this guard a write would surface as a 500 ("attempt to write
+        a readonly database"). Return a clean 409 instead.
+        """
+        if deps.daemon:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Argus is read-only because the argusd daemon is running. "
+                    "Manage indexing from the CLI (e.g. `argus search enable`) "
+                    "or stop the daemon with `argus daemon stop`."
+                ),
+            )
+
     @api.get("/api/sessions")
     def list_sessions(
         limit: int = 100, offset: int = 0,
@@ -321,6 +338,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
 
     @api.post("/api/alerts/{alert_id}/seen")
     def mark_alert_seen(alert_id: int) -> dict[str, Any]:
+        _require_writable()
         if not repo.mark_alert_seen(alert_id):
             raise HTTPException(status_code=404, detail="not found")
         return {"ok": True}
@@ -556,6 +574,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
 
     @api.post("/api/search-index/enable")
     def search_index_enable() -> dict[str, Any]:
+        _require_writable()
         repo.set_search_indexing_enabled(True)
         try:
             run_segment_backfill(deps.adapters, repo, deps.pricing_table)
@@ -575,11 +594,13 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
 
     @api.post("/api/search-index/disable")
     def search_index_disable() -> dict[str, Any]:
+        _require_writable()
         repo.set_search_indexing_enabled(False)
         return {"enabled": False}
 
     @api.post("/api/search-index/clear")
     def search_index_clear() -> dict[str, Any]:
+        _require_writable()
         before_bytes = repo.db_size_bytes()
         repo.clear_all_segments()
         repo.set_search_indexing_enabled(False)
