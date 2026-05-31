@@ -2,6 +2,7 @@ import * as echarts from 'echarts/core';
 import { LineChart, BarChart, HeatmapChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import { tok } from './format';
 
 echarts.use([LineChart, BarChart, HeatmapChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent, CanvasRenderer]);
 
@@ -25,16 +26,16 @@ export function makeChart(el: HTMLElement) {
   return echarts.init(el, null, { renderer: 'canvas' });
 }
 
-export function lineCost(el: HTMLElement, days: { day: string; cost: number }[]) {
+export function lineTokens(el: HTMLElement, days: { day: string; value: number }[]) {
   const c = makeChart(el);
   c.setOption({
     ...THEME,
-    tooltip: { ...THEME.tooltip, trigger: 'axis', valueFormatter: (v: number) => '$' + v.toFixed(2) },
+    tooltip: { ...THEME.tooltip, trigger: 'axis', valueFormatter: (v: number) => tok(v) + ' tokens' },
     grid: { left: 50, right: 18, top: 18, bottom: 30 },
     xAxis: { type: 'category', data: days.map(d => d.day.slice(5)), ...AXIS },
-    yAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: '${value}' }, splitLine: AXIS.splitLine, axisLine: { show: false } },
+    yAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: (v: number) => tok(v) }, splitLine: AXIS.splitLine, axisLine: { show: false } },
     series: [{
-      type: 'line', data: days.map(d => +d.cost.toFixed(4)),
+      type: 'line', data: days.map(d => d.value),
       smooth: true, symbol: 'circle', symbolSize: 5,
       lineStyle: { color: '#f0883e', width: 2 },
       itemStyle: { color: '#f0883e' },
@@ -65,17 +66,17 @@ export function agentSplit(el: HTMLElement, split: Record<string, { cost: number
   return c;
 }
 
-export function modelMix(el: HTMLElement, models: { name: string; cost: number }[]) {
+export function modelMix(el: HTMLElement, models: { name: string; value: number }[]) {
   const c = makeChart(el);
   const top = models.slice(0, 8);
   c.setOption({
     ...THEME,
-    tooltip: { ...THEME.tooltip, valueFormatter: (v: number) => '$' + v.toFixed(2) },
+    tooltip: { ...THEME.tooltip, valueFormatter: (v: number) => tok(v) + ' tokens' },
     grid: { left: 140, right: 30, top: 8, bottom: 24 },
-    xAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: '${value}' }, splitLine: AXIS.splitLine, axisLine: { show: false } },
+    xAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: (v: number) => tok(v) }, splitLine: AXIS.splitLine, axisLine: { show: false } },
     yAxis: { type: 'category', data: top.map(m => m.name).reverse(), axisLabel: { ...AXIS.axisLabel, fontSize: 11 }, axisLine: { show: false }, axisTick: { show: false } },
     series: [{
-      type: 'bar', data: top.map(m => +m.cost.toFixed(4)).reverse(),
+      type: 'bar', data: top.map(m => m.value).reverse(),
       itemStyle: { color: '#f0883e', borderRadius: [0, 4, 4, 0] },
       barWidth: '60%',
     }],
@@ -83,9 +84,9 @@ export function modelMix(el: HTMLElement, models: { name: string; cost: number }
   return c;
 }
 
-export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: number }[], lookbackDays = 90) {
+export function calendarHeatmap(el: HTMLElement, days: { day: string; value: number }[], lookbackDays = 90) {
   const c = makeChart(el);
-  const lookup = Object.fromEntries(days.map(d => [d.day, d.cost]));
+  const lookup = Object.fromEntries(days.map(d => [d.day, d.value]));
   // Anchor at UTC midnight so lookup keys align with the API's started_at.slice(0,10)
   // bucketing. Stepping by exactly 86400000 ms from a UTC-midnight anchor is robust against
   // local-timezone hour-of-day skew.
@@ -131,7 +132,7 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
     // ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']: Sun→6, Mon→0, Tue→1, ..., Sat→5
     const rowIdx = (d.getUTCDay() + 6) % 7;
     const weekIdx = Math.round((monOfWeek(dayMs) - firstWeekMonMs) / (7 * 86_400_000));
-    cells.push([weekIdx, rowIdx, +v.toFixed(4)]);
+    cells.push([weekIdx, rowIdx, v]);
     cellDate.set(`${weekIdx}-${rowIdx}`, key);
   }
   // Total columns spans first calendar week containing oldest day through
@@ -146,7 +147,7 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
         const dow = p.data[1];
         const v = p.data[2];
         const key = cellDate.get(`${wk}-${dow}`) ?? '';
-        return `${key}<br>${v > 0 ? '~$' + v.toFixed(2) : '<span style="color:#6b7585;">no activity</span>'}`;
+        return `${key}<br>${v > 0 ? tok(v) + ' tokens' : '<span style="color:#6b7585;">no activity</span>'}`;
       },
     },
     grid: { left: 30, right: 10, top: 8, bottom: 22 },
@@ -162,7 +163,7 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; cost: numb
       splitArea: { show: false },
     },
     visualMap: {
-      min: 0, max: Math.max(0.01, max),
+      min: 0, max: Math.max(1, max),
       calculable: true, orient: 'horizontal', left: 'center', bottom: 0,
       inRange: { color: ['#1c222d', '#7a3e1e', '#c2622e', '#f0883e'] },
       textStyle: { color: '#6b7585', fontSize: 10 },

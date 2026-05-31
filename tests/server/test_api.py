@@ -62,6 +62,31 @@ def test_write_endpoints_work_when_not_read_only(repo):
     assert r.json()["enabled"] is False
 
 
+def test_overview_exposes_token_breakdowns(api_client, repo):
+    """Overview drives its charts/rankings off tokens, not cost."""
+    # Two sessions + turns in the window so there are tokens to aggregate.
+    repo.upsert_session(session_factory("a", _iso(datetime.now(timezone.utc))))
+    repo.upsert_session(session_factory("b", _iso(datetime.now(timezone.utc))))
+    repo.upsert_turn(
+        turn_factory("ta", "a", _iso(datetime.now(timezone.utc)), fresh=100, output=50)
+    )
+    repo.upsert_turn(
+        turn_factory("tb", "b", _iso(datetime.now(timezone.utc)), fresh=10, output=5)
+    )
+
+    body = api_client.get("/api/overview?window=30d").json()
+
+    # Token breakdowns are present and sum to the headline token total.
+    assert "tokens_by_day" in body and "tokens_by_model" in body
+    assert sum(body["tokens_by_day"].values()) == body["total_tokens"]
+    assert sum(body["tokens_by_model"].values()) == body["total_tokens"]
+
+    # Top sessions are ranked by tokens (session "a" has more than "b").
+    ids = [s["id"] for s in body["top_sessions"]]
+    assert ids[0] == "a"
+    assert body["top_sessions"][0]["window_tokens"] >= body["top_sessions"][1]["window_tokens"]
+
+
 @pytest.fixture
 def api_client(repo):
     return TestClient(_make_app(repo))

@@ -165,6 +165,8 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
         total_tokens = 0
         by_day: dict[str, float] = {}
         cost_by_model: dict[str, float] = {}
+        tokens_by_day: dict[str, int] = {}
+        tokens_by_model: dict[str, int] = {}
         split: dict[str, dict[str, Any]] = {}
         sessions_per_agent: dict[str, set[str]] = {}
         active_sessions: set[str] = set()
@@ -176,6 +178,8 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             total_tokens += tokens
             by_day[r["day"]] = by_day.get(r["day"], 0.0) + r["cost"]
             cost_by_model[r["model"]] = cost_by_model.get(r["model"], 0.0) + r["cost"]
+            tokens_by_day[r["day"]] = tokens_by_day.get(r["day"], 0) + tokens
+            tokens_by_model[r["model"]] = tokens_by_model.get(r["model"], 0) + tokens
             active_sessions.add(r["session_id"])
             agent = session_meta.get(r["session_id"]).agent if r["session_id"] in session_meta else "unknown"
             split.setdefault(agent, {"cost": 0.0, "sessions": 0, "tokens": 0})
@@ -209,7 +213,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
                     "days_active": len(w["days"]),
                 }
             )
-        top_sessions.sort(key=lambda x: x["window_cost_usd"], reverse=True)
+        top_sessions.sort(key=lambda x: x["window_tokens"], reverse=True)
         top_sessions = top_sessions[:20]
 
         return {
@@ -220,6 +224,8 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             "agent_split": split,
             "cost_by_day": by_day,
             "cost_by_model": cost_by_model,
+            "tokens_by_day": tokens_by_day,
+            "tokens_by_model": tokens_by_model,
             "top_sessions": top_sessions,
         }
 
