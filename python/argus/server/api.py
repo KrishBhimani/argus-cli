@@ -475,7 +475,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
                     }
                 )
 
-        if q and transcript_roles:
+        if transcript_roles:
             try:
                 tr = repo.search_transcripts(
                     q=q.strip(), limit=limit, project=project, roles=transcript_roles

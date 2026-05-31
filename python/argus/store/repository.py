@@ -558,38 +558,63 @@ class Repository:
         session_id: str | None = None,
         roles: list[str] | None = None,
     ) -> dict[str, Any]:
-        conds: list[str] = ["transcript_fts MATCH ?"]
-        params: list[Any] = [q]
+        # Filters shared by both the FTS-search and the empty-query browse path.
+        extra: list[str] = []
+        extra_params: list[Any] = []
         if project:
-            conds.append("s.project_path = ?")
-            params.append(project)
+            extra.append("s.project_path = ?")
+            extra_params.append(project)
         if session_id:
-            conds.append("seg.session_id = ?")
-            params.append(session_id)
+            extra.append("seg.session_id = ?")
+            extra_params.append(session_id)
         if roles:
-            conds.append(f"seg.role IN ({','.join('?' for _ in roles)})")
-            params.extend(roles)
-        where = "WHERE " + " AND ".join(conds)
+            extra.append(f"seg.role IN ({','.join('?' for _ in roles)})")
+            extra_params.extend(roles)
 
+        if q and q.strip():
+            where = "WHERE transcript_fts MATCH ?" + "".join(f" AND {c}" for c in extra)
+            sql = f"""
+                SELECT seg.uid, seg.session_id, seg.timestamp, seg.role, seg.text,
+                       snippet(transcript_fts, 0, '<mark>', '</mark>', '…', 16) AS snippet,
+                       s.project_path AS project_path
+                FROM transcript_fts
+                JOIN transcript_segments seg ON seg.rowid = transcript_fts.rowid
+                LEFT JOIN sessions s ON s.id = seg.session_id
+                {where}
+                ORDER BY bm25(transcript_fts)
+                LIMIT ?
+            """
+            count_sql = f"""
+                SELECT COUNT(*) AS n FROM transcript_fts
+                JOIN transcript_segments seg ON seg.rowid = transcript_fts.rowid
+                LEFT JOIN sessions s ON s.id = seg.session_id
+                {where}
+            """
+            params = [q.strip(), *extra_params]
+            rows = [dict(r) for r in self.db.execute(sql, (*params, limit)).fetchall()]
+            total_row = self.db.execute(count_sql, params).fetchone()
+            return {"total": total_row["n"] if total_row else 0, "rows": rows}
+
+        # Empty query → browse the most recent segments (no FTS MATCH). Mirrors
+        # search_prompts' browse path so the role toggles work without typing.
+        where = ("WHERE " + " AND ".join(extra)) if extra else ""
         sql = f"""
             SELECT seg.uid, seg.session_id, seg.timestamp, seg.role, seg.text,
-                   snippet(transcript_fts, 0, '<mark>', '</mark>', '…', 16) AS snippet,
+                   substr(seg.text, 1, 200) AS snippet,
                    s.project_path AS project_path
-            FROM transcript_fts
-            JOIN transcript_segments seg ON seg.rowid = transcript_fts.rowid
+            FROM transcript_segments seg
             LEFT JOIN sessions s ON s.id = seg.session_id
             {where}
-            ORDER BY bm25(transcript_fts)
+            ORDER BY seg.timestamp DESC
             LIMIT ?
         """
         count_sql = f"""
-            SELECT COUNT(*) AS n FROM transcript_fts
-            JOIN transcript_segments seg ON seg.rowid = transcript_fts.rowid
+            SELECT COUNT(*) AS n FROM transcript_segments seg
             LEFT JOIN sessions s ON s.id = seg.session_id
             {where}
         """
-        rows = [dict(r) for r in self.db.execute(sql, (*params, limit)).fetchall()]
-        total_row = self.db.execute(count_sql, params).fetchone()
+        rows = [dict(r) for r in self.db.execute(sql, (*extra_params, limit)).fetchall()]
+        total_row = self.db.execute(count_sql, extra_params).fetchone()
         return {"total": total_row["n"] if total_row else 0, "rows": rows}
 
     def segment_projects(self) -> list[str]:

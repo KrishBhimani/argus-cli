@@ -157,6 +157,47 @@ def test_unified_search_respects_roles_filter(api_client, repo):
     assert all(r["role"] == "user" for r in body["results"] if r["kind"] == "transcript")
 
 
+def test_unified_search_browse_includes_transcripts_without_query(api_client, repo):
+    """Empty query (browse) must surface transcript segments, not just prompts —
+    so the Claude/replies toggles work without typing a query."""
+    repo.set_search_indexing_enabled(True)
+    repo.upsert_session(session_factory("s1", "2026-05-22T00:00:00Z"))
+    repo.insert_prompts(
+        [Prompt(timestamp_ms=1000, project_path="/p", display="a typed prompt", pasted_chars=0, is_slash=0)]
+    )
+    repo.upsert_transcript_segments(
+        [
+            TranscriptSegment(
+                uid="s1:a1:0",
+                session_id="s1",
+                timestamp="2026-05-22T00:00:01Z",
+                role="assistant",
+                text="claude said something here",
+            )
+        ]
+    )
+    # No q, Claude (assistant) selected alongside prompts.
+    body = api_client.get("/api/search?roles=prompt,assistant").json()
+    roles = {r["role"] for r in body["results"]}
+    assert "assistant" in roles  # the regression: was prompts-only before
+    assert body["transcript_total"] == 1
+
+
+def test_unified_search_browse_respects_role_toggle(api_client, repo):
+    """Browsing with only assistant selected returns assistant segments only."""
+    repo.set_search_indexing_enabled(True)
+    repo.upsert_session(session_factory("s1", "2026-05-22T00:00:00Z"))
+    repo.upsert_transcript_segments(
+        [
+            TranscriptSegment(uid="s1:u1:0", session_id="s1", timestamp="2026-05-22T00:00:00Z", role="user", text="a user reply"),
+            TranscriptSegment(uid="s1:a1:0", session_id="s1", timestamp="2026-05-22T00:00:01Z", role="assistant", text="an assistant reply"),
+        ]
+    )
+    body = api_client.get("/api/search?roles=assistant").json()
+    tr = [r for r in body["results"] if r["kind"] == "transcript"]
+    assert tr and all(r["role"] == "assistant" for r in tr)
+
+
 # ─── /api/sessions/:id/transcript ──────────────────────────────────────
 
 
