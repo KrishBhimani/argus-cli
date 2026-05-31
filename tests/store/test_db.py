@@ -1,7 +1,34 @@
 """Schema + migrations smoke tests."""
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
 from argus.store.db import open_db
+
+
+def test_open_db_read_only_rejects_writes(tmp_path):
+    # First create + migrate the DB read-write, then close it.
+    p = tmp_path / "argus.db"
+    rw = open_db(p)
+    rw.execute(
+        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('k', 'v')"
+    )
+    rw.close()
+
+    ro = open_db(p, read_only=True)
+    try:
+        # Reads work.
+        row = ro.execute("SELECT value FROM app_meta WHERE key = 'k'").fetchone()
+        assert row["value"] == "v"
+        # Writes are rejected by SQLite (mode=ro).
+        with pytest.raises(sqlite3.OperationalError):
+            ro.execute(
+                "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('x', 'y')"
+            )
+    finally:
+        ro.close()
 
 
 def test_creates_schema_on_first_open(db_path):
