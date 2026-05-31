@@ -109,6 +109,7 @@ class ApiDeps:
     ingest_status: Callable[[], IngestStatus]
     adapters: list[Adapter]
     pricing_table: PricingTable
+    daemon: bool = False
 
 
 def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
@@ -605,6 +606,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             "processed": status.processed,
             "total": status.total,
             "sessionCount": session_count,
+            "daemon": deps.daemon,
         }
 
     @api.get("/api/pricing")

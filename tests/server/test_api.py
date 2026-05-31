@@ -13,7 +13,7 @@ from argus.server.api import ApiDeps, build_api
 from tests.conftest import alert_factory, session_factory, turn_factory
 
 
-def _make_app(repo) -> FastAPI:
+def _make_app(repo, *, daemon: bool = False) -> FastAPI:
     app = FastAPI()
     api = build_api(
         repo,
@@ -24,10 +24,20 @@ def _make_app(repo) -> FastAPI:
             ),
             adapters=[],
             pricing_table=PricingTable(version="2026-05-02", models={}),
+            daemon=daemon,
         ),
     )
     app.include_router(api)
     return app
+
+
+def test_ingest_status_includes_daemon_flag(repo):
+    # Default: no daemon.
+    body = TestClient(_make_app(repo)).get("/api/ingest/status").json()
+    assert body["daemon"] is False
+    # Read-only/yielded dashboard: daemon=True flows through to the response.
+    body = TestClient(_make_app(repo, daemon=True)).get("/api/ingest/status").json()
+    assert body["daemon"] is True
 
 
 @pytest.fixture

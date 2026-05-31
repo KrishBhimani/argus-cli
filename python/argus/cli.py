@@ -77,8 +77,20 @@ def start(
     _setup_logging(quiet=quiet, verbose=verbose)
 
     from .core.runtime import CoreRuntime, NoAdaptersError
+    from .daemon import pidfile
 
-    runtime = CoreRuntime(data_dir, read_only=False)
+    daemon_pid = pidfile.read(data_dir)
+    if daemon_pid is not None and pidfile.is_running(daemon_pid):
+        read_only = True
+        logger.info("argusd %d active — dashboard is read-only.", daemon_pid)
+    else:
+        read_only = False
+        if daemon_pid is not None:
+            logger.info(
+                "Stale argusd PID file (process %d gone) — ignoring.", daemon_pid
+            )
+
+    runtime = CoreRuntime(data_dir, read_only=read_only)
     try:
         runtime.start()
     except NoAdaptersError as e:
@@ -96,6 +108,7 @@ def start(
             host=host,
             adapters=runtime.adapters,
             pricing_table=runtime.pricing_table,
+            daemon=read_only,
         ),
     )
     display_host = "localhost" if host in ("0.0.0.0", "::") else host

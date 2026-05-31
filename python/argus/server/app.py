@@ -31,6 +31,7 @@ class ServerOpts:
     adapters: list[Adapter]
     pricing_table: PricingTable
     host: str = "127.0.0.1"
+    daemon: bool = False
 
 
 def build_app(repo: Repository, opts: ServerOpts) -> FastAPI:
@@ -66,6 +67,7 @@ def build_app(repo: Repository, opts: ServerOpts) -> FastAPI:
             ingest_status=opts.ingest_status,
             adapters=opts.adapters,
             pricing_table=opts.pricing_table,
+            daemon=opts.daemon,
         ),
     )
     app.include_router(api)
