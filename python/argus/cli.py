@@ -12,11 +12,6 @@ import typer
 
 import argus.detectors  # noqa: F401  — triggers @register side-effects
 
-from .adapters.registry import available_adapters
-from .collector.first_run import run_first_pass_ingest
-from .collector.scheduler import start_scheduler
-from .collector.watcher import start_watcher
-from .detectors.registry import available_detectors
 from .pricing.load import load_pricing_table
 from .pricing.refresh import diff_pricing, fetch_litellm_table
 from .scaffold.scaffolder import scaffold_project
@@ -81,49 +76,26 @@ def start(
     """Start the watcher, ingester, and dashboard server."""
     _setup_logging(quiet=quiet, verbose=verbose)
 
-    db = open_db(data_dir / "argus.db")
-    repo = Repository(db)
+    from .core.runtime import CoreRuntime, NoAdaptersError
 
-    adapters = available_adapters()
-    if not adapters:
-        typer.echo(
-            "No adapter data found. Argus expects ~/.claude/ (Claude Code) "
-            "to be present at minimum.",
-            err=True,
-        )
+    runtime = CoreRuntime(data_dir, read_only=False)
+    try:
+        runtime.start()
+    except NoAdaptersError as e:
+        typer.echo(str(e), err=True)
         raise typer.Exit(code=1)
-
-    names = ", ".join(a.agent for a in adapters)
-    logger.info("Detected adapters: %s", names)
-
-    table = load_pricing_table()
-    logger.info("Argus: ingesting recent sessions...")
-    handle = run_first_pass_ingest(adapters, repo, table, recent_days=30)
-    handle.wait_foreground()
-    s = handle.status()
-    logger.info(
-        "Argus: foreground ingest complete (%d/%d files), starting watcher...",
-        s.processed,
-        s.total,
-    )
-
-    watcher = start_watcher(adapters, repo, table)
-
-    detectors = available_detectors()
-    logger.info("Loaded %d detectors: %s", len(detectors), [d.name for d in detectors])
-    scheduler = start_scheduler(detectors, repo)
 
     dash_dir = _dashboard_dir()
     server_app = build_app(
-        repo,
+        runtime.repo,
         ServerOpts(
-            pricing_table_version=table.version,
-            ingest_status=handle.status,
+            pricing_table_version=runtime.pricing_table.version,
+            ingest_status=runtime.ingest_status,
             dashboard_dir=dash_dir,
             port=port,
             host=host,
-            adapters=adapters,
-            pricing_table=table,
+            adapters=runtime.adapters,
+            pricing_table=runtime.pricing_table,
         ),
     )
     display_host = "localhost" if host in ("0.0.0.0", "::") else host
@@ -144,9 +116,7 @@ def start(
     except KeyboardInterrupt:
         pass
     finally:
-        scheduler.stop()
-        watcher.stop()
-        db.close()
+        runtime.stop()
         logger.info("Argus stopped.")
 
 
