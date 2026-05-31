@@ -100,6 +100,26 @@ exactly as before, so users who never touch the daemon see no change.
 > restart the dashboard (which then resumes ingesting in-process). The dashboard
 > does not re-check daemon liveness on every poll.
 
+**Running it long-term.** argusd is designed to stay up. Its idle cost is
+negligible — the watcher is event-driven (sleeps until a `~/.claude` file
+changes) and the detector scheduler wakes once every 10 minutes; expect ~40–70
+MB RAM and effectively no idle CPU. The log is capped at ~4 MB (1 MB × 3
+rotations). A few habits worth knowing:
+
+- **Restart after upgrading argus.** A running daemon holds the old code in
+  memory — run `argus daemon restart` after `uv sync` / `pip install -U` to pick
+  up changes.
+- **Crash recovery needs autostart.** A manually-started daemon (`argus daemon
+  start`) that crashes stays down until you start it again (the stale PID file
+  is cleaned up automatically). Use `argus install` if you want the OS to
+  restart it on failure / at next login.
+- **Windows stop is a hard kill.** `argus daemon stop` terminates the process
+  directly on Windows, so no `argusd stopped.` line is written to the log (the
+  CLI still prints it). This is safe — there's no critical in-memory state.
+- **Toggling search:** the dashboard's "Enable indexing" button indexes
+  immediately; the CLI `argus search enable` only flips the flag and defers the
+  backfill to the next `argus start` / `argus daemon restart`.
+
 Logs live at `~/.argus/argusd.log` (plain text, rotated at ~1 MB × 3).
 
 ### `argus claude` — project scaffolding
