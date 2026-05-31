@@ -3,7 +3,27 @@ from __future__ import annotations
 
 import sys
 
-from argus.daemon.autostart import linux, macos, windows
+import pytest
+
+from argus.daemon.autostart import AutostartError, linux, macos, windows
+
+
+class _FailResult:
+    returncode = 1
+    stderr = "ERROR: Access is denied."
+
+
+def test_windows_install_raises_on_schtasks_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(windows, "_run", lambda args: _FailResult())
+    with pytest.raises(AutostartError):
+        windows.install(tmp_path, start_now=False)
+
+
+def test_linux_install_raises_on_enable_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(linux, "unit_path", lambda: tmp_path / "argusd.service")
+    monkeypatch.setattr(linux, "_run", lambda args: _FailResult())
+    with pytest.raises(AutostartError):
+        linux.install(tmp_path, start_now=True)
 
 
 def test_linux_unit_content(tmp_path):

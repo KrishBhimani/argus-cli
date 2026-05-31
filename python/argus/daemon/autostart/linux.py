@@ -27,8 +27,18 @@ def render_unit(data_dir: Path) -> str:
     )
 
 
-def _run(args: list[str]) -> None:
-    subprocess.run(args, check=False)
+def _run(args: list[str]):
+    return subprocess.run(args, check=False, capture_output=True, text=True)
+
+
+def _check(result, what: str) -> None:
+    """Raise AutostartError if a captured command failed (mocks return None)."""
+    if result is not None and getattr(result, "returncode", 0) != 0:
+        from . import AutostartError
+
+        detail = (getattr(result, "stderr", "") or "").strip().splitlines()
+        hint = detail[0] if detail else "command failed"
+        raise AutostartError(f"{what}: {hint}")
 
 
 def install(data_dir: Path, *, start_now: bool = True) -> str:
@@ -36,10 +46,9 @@ def install(data_dir: Path, *, start_now: bool = True) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(render_unit(data_dir), encoding="utf-8")
     _run(["systemctl", "--user", "daemon-reload"])
-    if start_now:
-        _run(["systemctl", "--user", "enable", "--now", SERVICE_NAME])
-    else:
-        _run(["systemctl", "--user", "enable", SERVICE_NAME])
+    enable = ["systemctl", "--user", "enable"]
+    enable += ["--now", SERVICE_NAME] if start_now else [SERVICE_NAME]
+    _check(_run(enable), "Failed to enable systemd user service")
     return f"Registered systemd user service at {p}"
 
 

@@ -49,8 +49,18 @@ def render_plist(data_dir: Path) -> str:
     )
 
 
-def _run(args: list[str]) -> None:
-    subprocess.run(args, check=False)
+def _run(args: list[str]):
+    return subprocess.run(args, check=False, capture_output=True, text=True)
+
+
+def _check(result, what: str) -> None:
+    """Raise AutostartError if a captured command failed (mocks return None)."""
+    if result is not None and getattr(result, "returncode", 0) != 0:
+        from . import AutostartError
+
+        detail = (getattr(result, "stderr", "") or "").strip().splitlines()
+        hint = detail[0] if detail else "command failed"
+        raise AutostartError(f"{what}: {hint}")
 
 
 def install(data_dir: Path, *, start_now: bool = True) -> str:
@@ -58,7 +68,7 @@ def install(data_dir: Path, *, start_now: bool = True) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(render_plist(data_dir), encoding="utf-8")
     if start_now:
-        _run(["launchctl", "load", "-w", str(p)])
+        _check(_run(["launchctl", "load", "-w", str(p)]), "Failed to load launchd agent")
     return f"Registered launchd agent at {p}"
 
 

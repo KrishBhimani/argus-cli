@@ -5,6 +5,10 @@ import sys
 from pathlib import Path
 
 
+class AutostartError(RuntimeError):
+    """The OS service manager refused to register/deregister autostart."""
+
+
 def _backend():
     if sys.platform.startswith("linux"):
         from . import linux
