@@ -28,6 +28,7 @@ const path = Astro.url.pathname;
     <span class="status-pill" id="ingest-status">Loading…</span>
     <span style="margin: 0 0.8rem;">·</span>
     <span id="pricing-info">Pricing —</span>
+    <span id="daemon-status" style="margin-left: 0.8rem; display: none;" title="Ingestion is handled by the argusd background daemon">· Powered by argusd ●</span>
   </footer>
   <script>
     async function refresh() {
@@ -56,6 +57,8 @@ const path = Astro.url.pathname;
             ip.classList.add('busy');
           }
         }
+        const ds = document.getElementById('daemon-status');
+        if (ds) ds.style.display = s.daemon === true ? 'inline' : 'none';
       } catch (e) { /* server may not be live yet */ }
     }
     refresh();
