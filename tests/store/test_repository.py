@@ -222,6 +222,55 @@ def test_subagent_rollup_returns_only_task_tool(repo):
     assert types == ["Explore", "Plan"]
 
 
+def test_aggregate_turns_attributes_subagent_tokens_to_parent(repo):
+    """Windowed aggregation rolls sub-agent (``parent/sub``) turns into the
+    parent session id so the Overview reconciles with the session detail
+    total, which already includes the sub-agent rollup."""
+    parent = SAMPLE.model_copy(update={"id": "claude_code:p"})
+    sub = SAMPLE.model_copy(update={"id": "claude_code:p/explore"})
+    repo.upsert_session(parent)
+    repo.upsert_session(sub)
+    repo.upsert_turn(
+        SAMPLE_TURN.model_copy(
+            update={
+                "id": "claude_code:p:0",
+                "session_id": "claude_code:p",
+                "fresh_input_tokens": 100,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost_usd": 1.0,
+            }
+        )
+    )
+    repo.upsert_turn(
+        SAMPLE_TURN.model_copy(
+            update={
+                "id": "claude_code:p/explore:0",
+                "session_id": "claude_code:p/explore",
+                "fresh_input_tokens": 25,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost_usd": 0.5,
+            }
+        )
+    )
+
+    rows = repo.aggregate_turns_by_day("")
+
+    # No sub-agent ids leak through; their tokens roll into the parent.
+    assert all("/" not in r["session_id"] for r in rows)
+    by_session: dict[str, dict[str, float]] = {}
+    for r in rows:
+        agg = by_session.setdefault(r["session_id"], {"fresh": 0, "cost": 0.0})
+        agg["fresh"] += r["fresh_input"]
+        agg["cost"] += r["cost"]
+    assert "claude_code:p/explore" not in by_session
+    assert by_session["claude_code:p"]["fresh"] == 125
+    assert by_session["claude_code:p"]["cost"] == 1.5
+
+
 def test_inserts_prompts_and_fts_search_returns_marked_snippets(repo):
     repo.insert_prompts(
         [
