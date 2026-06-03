@@ -107,7 +107,7 @@ import Default from '../layouts/Default.astro';
 
         root.innerHTML = `
           <div class="grid-cards" style="margin-bottom:1.2rem;">
-            <div class="card kpi"><span class="kpi-label">Tokens</span><span class="kpi-value tokens">${tok(totalTokens)}</span><span class="kpi-sub">${num(totalTokens)} total</span></div>
+            <div class="card kpi"><span class="kpi-label">Tokens</span><span class="kpi-value tokens">${tok(totalTokens)}</span><span class="kpi-sub">${num(totalTokens)} total${subAgents?.length ? ` · incl. ${subAgents.length} sub-agent${subAgents.length === 1 ? '' : 's'}` : ''}</span></div>
             <div class="card kpi"><span class="kpi-label">Cost <span style="color:var(--text-2);font-weight:400;">(est.)</span></span><span class="kpi-value cost">~${usd(s.total_cost_usd)}</span><span class="kpi-sub">${reportedDelta}</span></div>
             <div class="card kpi"><span class="kpi-label">Turns</span><span class="kpi-value">${num(s.turn_count)}</span><span class="kpi-sub">${turns.length} loaded</span></div>
             <div class="card kpi"><span class="kpi-label">Duration</span><span class="kpi-value">${dur(s.duration_sec)}</span><span class="kpi-sub">started ${fmtLocalDateTime(s.started_at)}</span></div>

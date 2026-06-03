@@ -333,13 +333,29 @@ class Repository:
         """Per-turn aggregation for windowed views.
 
         Returns one row per (day, model, session_id) inside the cutoff.
-        Sub-agent rollup ids contain ``/`` and are excluded (their turns
-        roll into the parent session via the pipeline).
+        Sub-agent rollup ids look like ``parent/sub``; their turns are
+        attributed to the parent id (the part before the first ``/``) so
+        windowed totals match the session detail page, whose stored totals
+        already include the sub-agent rollup.
         """
         rows = self.db.execute(
             """
+            WITH t AS (
+              SELECT
+                substr(timestamp, 1, 10) AS day,
+                model,
+                CASE
+                  WHEN instr(session_id, '/') > 0
+                  THEN substr(session_id, 1, instr(session_id, '/') - 1)
+                  ELSE session_id
+                END AS session_id,
+                cost_usd, fresh_input_tokens, output_tokens,
+                cache_read_tokens, cache_write_tokens
+              FROM turns
+              WHERE timestamp >= ?
+            )
             SELECT
-              substr(timestamp, 1, 10) AS day,
+              day,
               model,
               session_id,
               COALESCE(SUM(cost_usd), 0) AS cost,
@@ -347,9 +363,7 @@ class Repository:
               COALESCE(SUM(output_tokens), 0) AS output,
               COALESCE(SUM(cache_read_tokens), 0) AS cache_read,
               COALESCE(SUM(cache_write_tokens), 0) AS cache_write
-            FROM turns
-            WHERE timestamp >= ?
-              AND session_id NOT LIKE '%/%'
+            FROM t
             GROUP BY day, model, session_id
             ORDER BY day ASC
             """,
