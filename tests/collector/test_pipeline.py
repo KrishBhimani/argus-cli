@@ -129,6 +129,135 @@ def test_subagent_files_not_counted_twice(tmp_path: Path, repo):
     assert parent.turn_count == 3
 
 
+def test_subagent_backfills_without_reingesting_parent(tmp_path: Path, repo):
+    """REGRESSION: a sub-agent appearing after the parent's last turn must
+    roll up on the next ingest tick — no parent growth, no wipe required.
+
+    Models the real bug: a session ingested to EOF, then sub-agent files
+    that were never picked up (here: didn't exist at first ingest). The
+    second ingest reads zero new parent bytes, yet must still backfill.
+    """
+    def line(sid: str, mid: str, tokens: int) -> str:
+        return json.dumps(
+            {
+                "type": "assistant",
+                "sessionId": sid,
+                "uuid": "u" + mid,
+                "timestamp": "2026-05-01T00:00:00Z",
+                "cwd": "C:/proj",
+                "version": "2.1.94",
+                "userType": "external",
+                "entrypoint": "cli",
+                "message": {
+                    "id": mid,
+                    "model": "claude-opus-4-7",
+                    "role": "assistant",
+                    "content": [],
+                    "usage": {
+                        "input_tokens": tokens,
+                        "output_tokens": tokens,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                    },
+                },
+            }
+        )
+
+    claude_root = tmp_path / ".claude"
+    proj = claude_root / "projects" / "C--proj"
+    proj.mkdir(parents=True)
+    parent_file = proj / "parent.jsonl"
+    parent_file.write_text(line("parent", "p1", 1_000_000) + "\n", encoding="utf-8")
+
+    adapter = ClaudeCodeAdapter(claude_root)
+    table = load_pricing_table()
+
+    # First ingest: parent only, no sub-agent dir yet. Offset parks at EOF.
+    ingest_file(adapter, parent_file, repo, table)
+    parent = repo.get_session("claude_code:parent")
+    assert parent.total_fresh_input_tokens == 1_000_000
+    assert parent.metadata.get("sub_agent_session_ids", []) == []
+
+    # A workflow sub-agent transcript appears (nested layout), but the parent
+    # file does NOT grow.
+    wf = proj / "parent" / "subagents" / "workflows" / "wf_x"
+    wf.mkdir(parents=True)
+    (wf / "agent-aabc.jsonl").write_text(line("parent", "s1", 500_000) + "\n", encoding="utf-8")
+
+    # Second ingest of the unchanged parent: must backfill the sub-agent.
+    ingest_file(adapter, parent_file, repo, table)
+    parent = repo.get_session("claude_code:parent")
+    assert parent.total_fresh_input_tokens == 1_500_000
+    assert parent.total_output_tokens == 1_500_000
+    assert parent.turn_count == 2
+    assert len(parent.metadata.get("sub_agent_session_ids", [])) == 1
+    # Descriptive fields survived the no-new-parent-bytes recompute.
+    assert parent.project_path == "C:/proj"
+
+
+def test_steady_state_reingest_is_a_noop_for_unchanged_subagents(tmp_path: Path, repo, monkeypatch):
+    """A re-ingest with no growth anywhere must not rewrite session rows."""
+    def line(sid: str, mid: str, tokens: int) -> str:
+        return json.dumps(
+            {
+                "type": "assistant",
+                "sessionId": sid,
+                "uuid": "u" + mid,
+                "timestamp": "2026-05-01T00:00:00Z",
+                "cwd": "C:/proj",
+                "version": "2.1.94",
+                "userType": "external",
+                "entrypoint": "cli",
+                "message": {
+                    "id": mid,
+                    "model": "claude-opus-4-7",
+                    "role": "assistant",
+                    "content": [],
+                    "usage": {
+                        "input_tokens": tokens,
+                        "output_tokens": tokens,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                    },
+                },
+            }
+        )
+
+    claude_root = tmp_path / ".claude"
+    proj = claude_root / "projects" / "C--proj"
+    proj.mkdir(parents=True)
+    parent_file = proj / "parent.jsonl"
+    parent_file.write_text(line("parent", "p1", 1_000_000) + "\n", encoding="utf-8")
+    wf = proj / "parent" / "subagents" / "workflows" / "wf_x"
+    wf.mkdir(parents=True)
+    (wf / "agent-aabc.jsonl").write_text(line("parent", "s1", 500_000) + "\n", encoding="utf-8")
+
+    adapter = ClaudeCodeAdapter(claude_root)
+    table = load_pricing_table()
+    ingest_file(adapter, parent_file, repo, table)
+
+    # On a no-growth re-ingest, the adapter must never be asked to read a
+    # sub-agent file's bytes (only stat'd), and no session row is rewritten.
+    real_ingest = adapter.ingest_file
+    read_paths: list[str] = []
+
+    def spy(path, from_offset=0):
+        # Sub-agent reads pass a path inside subagents/; the parent re-read is
+        # expected (it returns zero new turns).
+        if "subagents" in Path(path).parts:
+            read_paths.append(str(path))
+        return real_ingest(path, from_offset)
+
+    monkeypatch.setattr(adapter, "ingest_file", spy)
+    upserts: list[str] = []
+    real_upsert = repo.upsert_session
+    monkeypatch.setattr(repo, "upsert_session", lambda s: (upserts.append(s.id), real_upsert(s))[1])
+
+    ingest_file(adapter, parent_file, repo, table)
+    assert read_paths == []          # no sub-agent file was re-read
+    assert upserts == []             # no session row was rewritten
+
+
 def test_ingests_synthetic_session_end_to_end(tmp_path: Path, repo):
     claude_root = tmp_path / ".claude"
     proj = claude_root / "projects" / "C--proj"

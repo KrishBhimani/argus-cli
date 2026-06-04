@@ -10,9 +10,12 @@ Path-safety rules:
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _IS_WIN = sys.platform == "win32"
 
@@ -64,9 +67,40 @@ def discover_session_files(claude_root: Path) -> list[Path]:
 
 
 def sub_agent_files_for(session_file: Path) -> list[Path]:
-    """Return ``<session_dir>/<sid>/subagents/*.jsonl`` if it exists."""
+    """Return the sub-agent transcript JSONLs for a session.
+
+    Two on-disk layouts coexist under ``<session_dir>/<sid>/subagents/``:
+
+    - **Flat** (plain Task/Agent sub-agents): ``subagents/*.jsonl``.
+    - **Nested** (Workflow sub-agents): each workflow run gets its own
+      directory, ``subagents/workflows/<wf-id>/agent-*.jsonl``. Only the
+      ``agent-*.jsonl`` files are real transcripts — ``journal.jsonl`` is
+      workflow bookkeeping (no turns) and ``*.meta.json`` are sidecars, so
+      neither matches and both are excluded.
+
+    Matching is an allowlist (known transcript shapes) rather than "every
+    ``.jsonl``", so a future bookkeeping file can never be mistaken for a
+    sub-session and inflate the parent's rollup. The tripwire below means
+    that if Claude Code changes the naming and we start matching nothing,
+    it's logged rather than silently under-counting.
+    """
     sid = session_file.stem  # filename without .jsonl
     sub = session_file.parent / sid / "subagents"
     if not sub.exists():
         return []
-    return sorted(f for f in sub.iterdir() if f.suffix == ".jsonl")
+    out: set[Path] = set()
+    # Flat transcripts directly under subagents/ (dirs like workflows/ have
+    # no .jsonl suffix, so they're skipped here).
+    out.update(f for f in sub.iterdir() if f.is_file() and f.suffix == ".jsonl")
+    # Nested Workflow sub-agent transcripts, any depth below subagents/.
+    out.update(f for f in sub.rglob("agent-*.jsonl") if f.is_file())
+
+    if not out and any(c.is_dir() for c in sub.iterdir()):
+        # subagents/ has subdirectories but nothing matched — the layout
+        # likely changed. Surface it instead of quietly reporting zero.
+        logger.warning(
+            "subagents/ for %s contains subdirectories but no recognized "
+            "transcript files matched; sub-agent layout may have changed",
+            session_file.name,
+        )
+    return sorted(out)

@@ -5,10 +5,34 @@ from pathlib import Path
 
 from ..adapters.base import Adapter, RawSegment, RawToolCall
 from ..pricing.types import PricingTable
-from ..schema.types import Session, ToolCall, TranscriptSegment
+from ..schema.types import RawSessionHeader, Session, ToolCall, TranscriptSegment
 from ..store.repository import Repository
 from .aggregate import build_session, build_turn
 from .rollup_subagents import rollup_subagents
+
+
+def _header_for_recompute(
+    header: RawSessionHeader, existing: Session | None, has_new_turns: bool
+) -> RawSessionHeader:
+    """Header to use when (re)building a session row.
+
+    With new turns this tick, the freshly-parsed ``header`` is authoritative.
+    With NO new turns (e.g. a zero-byte re-read), the adapter returns a blank
+    placeholder header — using it would wipe ``project_path`` / ``started_at``
+    / etc. on the stored row, so prefer the values already persisted.
+    """
+    if has_new_turns or existing is None:
+        return header
+    return header.model_copy(
+        update={
+            "project_path": existing.project_path,
+            "agent_version": existing.agent_version,
+            "started_at": existing.started_at,
+            "ended_at": existing.ended_at,
+            "agent_reported_cost_usd": existing.agent_reported_cost_usd,
+            "metadata": existing.metadata,
+        }
+    )
 
 
 def _to_tool_call(r: RawToolCall, session_id: str) -> ToolCall:
@@ -52,21 +76,22 @@ def ingest_file(
             }
         )
 
-    # No turn events in the bytes we just read.
-    #   (a) re-ingest with no growth — nothing to do
+    session_id = f"{result.header.agent}:{result.header.native_session_id}"
+    existing = repo.get_session(session_id)
+
+    # No new parent turns AND no session yet:
     #   (b) first ingest of a file with only metadata / user lines / hooks
     #   (c) Codex stub (binary launched, no prompt sent)
-    # For (b)/(c) we still record the new offset, but MUST NOT create an
-    # empty session row that would clutter the dashboard.
-    if not result.turns:
+    # Record the new offset, but MUST NOT create an empty session row that
+    # would clutter the dashboard. (A no-new-turns tick on an *existing*
+    # session falls through — its sub-agents may still need reconciling.)
+    if not result.turns and existing is None:
         if new_offset > from_offset:
             repo.set_file_offset(file_str, new_offset)
         return
 
-    session_id = f"{result.header.agent}:{result.header.native_session_id}"
-
     # Ensure a session row exists (FK target for turns + tool_calls).
-    if repo.get_session(session_id) is None:
+    if existing is None:
         repo.upsert_session(build_session(result.header, session_id, [], table.version))
 
     for raw in result.turns:
@@ -81,11 +106,26 @@ def ingest_file(
         )
 
     # Sub-agents: each sub-agent JSONL becomes its own session under
-    # <sessionId>/<filename>. Adapter decides what counts as a sub-session
-    # via sub_session_files_for(); the pipeline never branches on agent.
+    # <sessionId>/<filename>. We reconcile them even on a tick with no new
+    # parent turns (so sessions ingested before sub-agent support backfill
+    # without a wipe), but only re-read/rebuild a sub-file that has actually
+    # grown since its recorded offset — a cheap stat keeps steady-state
+    # restarts from re-reading and rewriting unchanged sub-sessions.
     sub_sessions: list[Session] = []
+    subs_changed = False
     if not adapter.should_skip(file_path):
-        for sub in adapter.sub_session_files_for(file_path):
+        sub_files = adapter.sub_session_files_for(file_path)
+        grown: set[Path] = set()
+        for sub in sub_files:
+            sub_from_offset = repo.get_file_offset(str(sub))
+            try:
+                if sub.stat().st_size > sub_from_offset:
+                    grown.add(sub)
+            except OSError:
+                continue
+
+        for sub in grown:
+            subs_changed = True
             sub_session_id = f"{session_id}/{sub.stem}"
             sub_from_offset = repo.get_file_offset(str(sub))
             sub_result, sub_new_offset = adapter.ingest_file(sub, sub_from_offset)
@@ -100,10 +140,8 @@ def ingest_file(
                     }
                 )
 
-            if (
-                repo.get_session(sub_session_id) is None
-                and sub_result.turns
-            ):
+            existing_sub = repo.get_session(sub_session_id)
+            if existing_sub is None and sub_result.turns:
                 repo.upsert_session(
                     build_session(sub_result.header, sub_session_id, [], table.version)
                 )
@@ -122,19 +160,38 @@ def ingest_file(
             if existing_sub:
                 all_sub_turns = repo.get_turns_for_session(sub_session_id)
                 recomputed = build_session(
-                    sub_result.header, sub_session_id, all_sub_turns, table.version
+                    _header_for_recompute(
+                        sub_result.header, existing_sub, bool(sub_result.turns)
+                    ),
+                    sub_session_id,
+                    all_sub_turns,
+                    table.version,
                 )
                 repo.upsert_session(recomputed)
                 sub_sessions.append(recomputed)
             repo.set_file_offset(str(sub), sub_new_offset)
 
-    # Recompute parent session totals from ALL stored turns (the new ones
-    # we just upserted + any previously stored). Then layer the sub-agent
-    # rollup on top — build_session only sums the parent's own turns, so
-    # this is idempotent.
-    all_turns = repo.get_turns_for_session(session_id)
-    session = build_session(result.header, session_id, all_turns, table.version)
-    if sub_sessions:
-        session = rollup_subagents(session, sub_sessions)
-    repo.upsert_session(session)
-    repo.set_file_offset(file_str, new_offset)
+        # If we're going to recompute the parent, the rollup needs every
+        # sub-session, not just the ones that changed this tick — pull the
+        # unchanged ones from their stored rows (no re-read).
+        if result.turns or subs_changed or existing is None:
+            for sub in sub_files:
+                if sub in grown:
+                    continue
+                stored_sub = repo.get_session(f"{session_id}/{sub.stem}")
+                if stored_sub is not None:
+                    sub_sessions.append(stored_sub)
+
+    # Recompute the parent (and re-apply the rollup) only when something
+    # actually changed: new parent turns, a grown sub-file, or a brand-new
+    # session. Otherwise the stored row is already correct — skip the work.
+    if result.turns or subs_changed or existing is None:
+        header = _header_for_recompute(result.header, existing, bool(result.turns))
+        all_turns = repo.get_turns_for_session(session_id)
+        session = build_session(header, session_id, all_turns, table.version)
+        if sub_sessions:
+            session = rollup_subagents(session, sub_sessions)
+        repo.upsert_session(session)
+
+    if new_offset > from_offset:
+        repo.set_file_offset(file_str, new_offset)
