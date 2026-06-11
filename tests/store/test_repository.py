@@ -610,3 +610,75 @@ def test_upsert_segments_persists_tool_use_id(repo):
         "SELECT tool_use_id FROM transcript_segments WHERE uid = 's1:u1:0'"
     ).fetchone()
     assert row["tool_use_id"] == "toolu_abc"
+
+
+def _tool_call(sid: str, tool_use_id: str, *, turn_index: int = 0,
+               tool_name: str = "Bash", is_error: int = 0,
+               subagent_type: str | None = None,
+               ts: str = "2026-05-01T00:00:01Z") -> ToolCall:
+    return ToolCall(
+        id=f"{sid}:{tool_use_id}", session_id=sid, turn_index=turn_index,
+        tool_name=tool_name, is_error=is_error, input_size=42,
+        subagent_type=subagent_type, timestamp=ts,
+    )
+
+
+def _timeline_fixture(repo):
+    """Session with 2 turns; turn 0 has an ok Read + failed Bash, turn 1 has none."""
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    t0 = turn_factory("s1:m0", "s1", "2026-05-01T00:00:00Z")
+    t1 = turn_factory("s1:m1", "s1", "2026-05-01T00:00:05Z").model_copy(
+        update={"sequence": 1}
+    )
+    repo.upsert_turn(t0)
+    repo.upsert_turn(t1)
+    repo.upsert_tool_calls([
+        _tool_call("s1", "tu_read", tool_name="Read"),
+        _tool_call("s1", "tu_bash", tool_name="Bash", is_error=1,
+                   ts="2026-05-01T00:00:02Z"),
+    ])
+
+
+def test_session_timeline_nests_calls_under_turns(repo):
+    _timeline_fixture(repo)
+    tl = repo.session_timeline("s1")
+    assert [t["sequence"] for t in tl] == [0, 1]
+    assert [c["tool_name"] for c in tl[0]["tool_calls"]] == ["Read", "Bash"]
+    assert tl[1]["tool_calls"] == []
+    assert tl[0]["cost_usd"] == 1.5
+    assert tl[0]["fresh_input_tokens"] == 100
+
+
+def test_session_timeline_attaches_error_text_when_indexed(repo):
+    _timeline_fixture(repo)
+    repo.set_search_indexing_enabled(True)
+    repo.upsert_transcript_segments([
+        _segment("s1:u9:0", "s1", text="FAILED: exit 1", tool_use_id="tu_bash"),
+    ])
+    tl = repo.session_timeline("s1")
+    bash = tl[0]["tool_calls"][1]
+    assert bash["is_error"] == 1
+    assert bash["error_text"] == "FAILED: exit 1"
+    # Non-failing calls never get error_text, even if a segment matched.
+    assert tl[0]["tool_calls"][0]["error_text"] is None
+
+
+def test_session_timeline_no_error_text_when_indexing_off(repo):
+    _timeline_fixture(repo)
+    repo.set_search_indexing_enabled(False)
+    repo.upsert_transcript_segments([
+        _segment("s1:u9:0", "s1", text="FAILED: exit 1", tool_use_id="tu_bash"),
+    ])
+    tl = repo.session_timeline("s1")
+    assert tl[0]["tool_calls"][1]["error_text"] is None
+
+
+def test_session_timeline_failed_call_without_segment(repo):
+    _timeline_fixture(repo)
+    repo.set_search_indexing_enabled(True)  # indexed, but no matching segment
+    tl = repo.session_timeline("s1")
+    assert tl[0]["tool_calls"][1]["error_text"] is None
+
+
+def test_session_timeline_unknown_session_is_empty(repo):
+    assert repo.session_timeline("nope") == []

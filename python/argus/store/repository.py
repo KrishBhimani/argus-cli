@@ -204,6 +204,70 @@ class Repository:
         ).fetchall()
         return [_row_to_turn(r) for r in rows]
 
+    def session_timeline(self, session_id: str) -> list[dict[str, Any]]:
+        """Turns with their tool calls nested; error text attached to failed
+        calls when search indexing is on and a linked tool_result segment
+        exists. Powers GET /api/sessions/{id}/timeline."""
+        turns = self.get_turns_for_session(session_id)
+        call_rows = self.db.execute(
+            """
+            SELECT id, turn_index, tool_name, is_error, input_size, subagent_type
+            FROM tool_calls WHERE session_id = ?
+            ORDER BY turn_index, timestamp, id
+            """,
+            (session_id,),
+        ).fetchall()
+
+        # tool_calls.id is f"{session_id}:{tool_use_id}" (pipeline._to_tool_call).
+        prefix = f"{session_id}:"
+
+        error_text: dict[str, str] = {}
+        if self.is_search_indexing_enabled():
+            failed_ids = [
+                r["id"][len(prefix):]
+                for r in call_rows
+                if r["is_error"] and r["id"].startswith(prefix)
+            ]
+            if failed_ids:
+                ph = ",".join("?" for _ in failed_ids)
+                seg_rows = self.db.execute(
+                    f"""
+                    SELECT tool_use_id, text FROM transcript_segments
+                    WHERE session_id = ? AND role = 'tool_result'
+                      AND tool_use_id IN ({ph})
+                    """,
+                    [session_id, *failed_ids],
+                ).fetchall()
+                error_text = {r["tool_use_id"]: r["text"] for r in seg_rows}
+
+        calls_by_turn: dict[int, list[dict[str, Any]]] = {}
+        for r in call_rows:
+            tu_id = r["id"][len(prefix):] if r["id"].startswith(prefix) else r["id"]
+            calls_by_turn.setdefault(r["turn_index"], []).append(
+                {
+                    "tool_name": r["tool_name"],
+                    "is_error": r["is_error"],
+                    "input_size": r["input_size"],
+                    "subagent_type": r["subagent_type"],
+                    "error_text": error_text.get(tu_id) if r["is_error"] else None,
+                }
+            )
+
+        return [
+            {
+                "sequence": t.sequence,
+                "timestamp": t.timestamp,
+                "model": t.model,
+                "fresh_input_tokens": t.fresh_input_tokens,
+                "cache_read_tokens": t.cache_read_tokens,
+                "cache_write_tokens": t.cache_write_tokens,
+                "output_tokens": t.output_tokens,
+                "cost_usd": t.cost_usd,
+                "tool_calls": calls_by_turn.get(t.sequence, []),
+            }
+            for t in turns
+        ]
+
     # ─── File offsets / parse errors ───────────────────────────────────
 
     def set_file_offset(self, path: str, offset: int) -> None:
