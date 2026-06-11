@@ -727,3 +727,38 @@ def test_session_timeline_calls_expose_tool_use_id(repo):
     _timeline_fixture(repo)
     tl = repo.session_timeline("s1")
     assert [c["tool_use_id"] for c in tl[0]["tool_calls"]] == ["tu_read", "tu_bash"]
+
+
+def test_sessions_with_unpriced_turns_finds_zero_cost_priced_models(repo):
+    repo.upsert_session(session_factory("claude_code:a", "2026-05-01T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:b", "2026-05-02T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:c", "2026-05-03T00:00:00Z"))
+    # a: zero-cost turn on a model the table NOW prices -> needs repricing.
+    repo.upsert_turn(turn_factory("a:m0", "claude_code:a", "2026-05-01T00:00:00Z",
+                                  cost=0.0, model="claude-fable-5"))
+    # b: zero-cost turn on a model the table still does not price -> skip
+    # (would otherwise re-ingest every startup forever).
+    repo.upsert_turn(turn_factory("b:m0", "claude_code:b", "2026-05-02T00:00:00Z",
+                                  cost=0.0, model="mystery-model"))
+    # c: already-priced turn -> skip.
+    repo.upsert_turn(turn_factory("c:m0", "claude_code:c", "2026-05-03T00:00:00Z",
+                                  cost=1.5, model="claude-fable-5"))
+    ids = [r["id"] for r in repo.sessions_with_unpriced_turns(
+        ["claude-fable-5", "claude-opus-4-8"], 100)]
+    assert ids == ["claude_code:a"]
+
+
+def test_sessions_with_unpriced_turns_collapses_subagents_to_parent(repo):
+    repo.upsert_session(session_factory("claude_code:p", "2026-05-01T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:p/sub", "2026-05-01T00:00:00Z"))
+    repo.upsert_turn(turn_factory("ps:m0", "claude_code:p/sub", "2026-05-01T00:00:00Z",
+                                  cost=0.0, model="claude-fable-5"))
+    ids = [r["id"] for r in repo.sessions_with_unpriced_turns(["claude-fable-5"], 100)]
+    assert ids == ["claude_code:p"]
+
+
+def test_sessions_with_unpriced_turns_ignores_tokenless_turns(repo):
+    repo.upsert_session(session_factory("claude_code:a", "2026-05-01T00:00:00Z"))
+    repo.upsert_turn(turn_factory("a:m0", "claude_code:a", "2026-05-01T00:00:00Z",
+                                  cost=0.0, fresh=0, output=0, model="claude-fable-5"))
+    assert repo.sessions_with_unpriced_turns(["claude-fable-5"], 100) == []

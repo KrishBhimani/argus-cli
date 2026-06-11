@@ -160,6 +160,12 @@ def _backfill_missing_derived_data(
         for c in repo.sessions_missing_tool_use_ids(200):
             ids.add(c["id"])
             deep_reset.add(c["id"])
+    # Zero-cost turns whose model the current table prices: ingested before
+    # the model was in the bundled table. Sub-agent turns need their files
+    # re-read too, hence deep_reset.
+    for c in repo.sessions_with_unpriced_turns(list(table.models.keys()), 200):
+        ids.add(c["id"])
+        deep_reset.add(c["id"])
     candidates = sorted(ids)[:200]
     if not candidates:
         return

@@ -146,3 +146,62 @@ def test_backfill_fills_missing_tool_use_ids(tmp_path: Path, repo):
     ).fetchone()
     assert row["tool_use_id"] == "tu_x"
     assert repo.sessions_missing_tool_use_ids(10) == []
+
+
+def test_backfill_reprices_zero_cost_turns(tmp_path: Path, repo):
+    """Turns ingested before their model was in the pricing table (cost 0)
+    get repriced by the startup backfill once the table knows the model."""
+    from argus.collector.first_run import _backfill_missing_derived_data
+    from argus.collector.pipeline import ingest_file
+
+    claude_root = tmp_path / ".claude"
+    proj = claude_root / "projects" / "C--proj"
+    proj.mkdir(parents=True)
+    f = proj / "s1.jsonl"
+    line = {
+        "type": "assistant",
+        "sessionId": "s1",
+        "uuid": "ua",
+        "timestamp": "2026-05-01T00:00:00Z",
+        "cwd": "C:/proj",
+        "version": "2.1.94",
+        "userType": "external",
+        "entrypoint": "cli",
+        "message": {
+            "id": "m1",
+            "model": "claude-fable-5",
+            "role": "assistant",
+            # The tool_use matters: it keeps sessions_missing_tool_calls from
+            # coincidentally re-ingesting this session, so the test exercises
+            # the repricing path specifically.
+            "content": [
+                {"type": "text", "text": "hi"},
+                {"type": "tool_use", "id": "tu_1", "name": "Bash", "input": {}},
+            ],
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 2000,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        },
+    }
+    f.write_text(json.dumps(line) + "\n", encoding="utf-8")
+
+    adapter = ClaudeCodeAdapter(claude_root)
+    table = load_pricing_table()
+    ingest_file(adapter, f, repo, table)
+
+    # Simulate rows ingested under a pre-fable pricing table.
+    with repo.db:
+        repo.db.execute("UPDATE turns SET cost_usd = 0")
+        repo.db.execute("UPDATE sessions SET total_cost_usd = 0")
+    assert [c["id"] for c in repo.sessions_with_unpriced_turns(
+        list(table.models.keys()), 10)] == ["claude_code:s1"]
+
+    _backfill_missing_derived_data([adapter], repo, table)
+
+    session = repo.get_session("claude_code:s1")
+    # 1000 in * $10/M + 2000 out * $50/M = 0.01 + 0.10
+    assert abs(session.total_cost_usd - 0.11) < 1e-9
+    assert repo.sessions_with_unpriced_turns(list(table.models.keys()), 10) == []

@@ -7,7 +7,14 @@ from pathlib import Path
 
 from .types import PricingTable
 
-_DEFAULT_FILENAME = "2026-05-02.json"
+def _latest_table_file(d: Path) -> Path:
+    """Newest pricing file in ``d`` — versions are ISO dates, so lexicographic
+    max is chronological max. `argus pricing refresh` writes {version}.json;
+    picking the latest here is what makes a refresh actually take effect."""
+    candidates = sorted(d.glob("*.json"))
+    if not candidates:
+        raise FileNotFoundError(f"no pricing tables in {d}")
+    return candidates[-1]
 
 
 def _bundled_dir() -> Path:
@@ -23,11 +30,11 @@ def _bundled_dir() -> Path:
     location if the expected JSON actually lives there — otherwise we fall
     back to the repo-root ``pricing/`` directory.
     """
-    # In-wheel location: only trust it if the expected file is present.
+    # In-wheel location: only trust it if a pricing table is present.
     try:
         traversable = resources.files("argus") / "pricing"
         candidate = Path(str(traversable))
-        if (candidate / _DEFAULT_FILENAME).exists():
+        if any(candidate.glob("*.json")):
             return candidate
     except (ModuleNotFoundError, FileNotFoundError):
         pass
@@ -39,7 +46,8 @@ def _bundled_dir() -> Path:
 
 
 def load_pricing_table(path: Path | None = None) -> PricingTable:
-    """Read a pricing JSON from disk and parse it."""
-    p = path or (_bundled_dir() / _DEFAULT_FILENAME)
+    """Read a pricing JSON from disk and parse it. With no explicit path,
+    loads the newest table in the bundled dir (refreshes write new files)."""
+    p = path or _latest_table_file(_bundled_dir())
     raw = p.read_text(encoding="utf-8")
     return PricingTable.model_validate(json.loads(raw))

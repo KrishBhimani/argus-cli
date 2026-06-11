@@ -617,6 +617,35 @@ class Repository:
         ).fetchone()
         return row["n"] if row else 0
 
+    def sessions_with_unpriced_turns(
+        self, priced_models: list[str], limit: int
+    ) -> list[dict[str, Any]]:
+        """Sessions with zero-cost turns whose model the CURRENT pricing
+        table prices — i.e. turns ingested before the model was in the
+        bundled table. Restricting to now-priced models keeps still-unknown
+        models from re-ingesting on every startup. Sub-agent ids collapse
+        to their parent so the backfill re-ingests the parent file tree."""
+        if not priced_models:
+            return []
+        ph = ",".join("?" for _ in priced_models)
+        rows = self.db.execute(
+            f"""
+            SELECT DISTINCT
+              CASE WHEN instr(t.session_id, '/') > 0
+                   THEN substr(t.session_id, 1, instr(t.session_id, '/') - 1)
+                   ELSE t.session_id END AS id
+            FROM turns t
+            WHERE t.cost_usd = 0
+              AND t.model IN ({ph})
+              AND (t.fresh_input_tokens + t.output_tokens
+                   + t.cache_read_tokens + t.cache_write_tokens) > 0
+            ORDER BY id
+            LIMIT ?
+            """,
+            [*priced_models, limit],
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
+
     def tool_output_for(self, session_id: str, tool_use_id: str) -> str | None:
         """Indexed tool_result text for one call, or None if not indexed."""
         row = self.db.execute(
