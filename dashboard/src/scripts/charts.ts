@@ -223,23 +223,23 @@ export function turnTokensBar(
   return c;
 }
 
-export function trendsLine(el: HTMLElement, points: { bucket: string; groups: Record<string, { cost: number }> }[]) {
+export function trendsLine(el: HTMLElement, points: { bucket: string; groups: Record<string, { tokens: number }> }[]) {
   const c = makeChart(el);
   const allKeys = [...new Set(points.flatMap(p => Object.keys(p.groups)))];
   const palette = ['#f0883e', '#58a6ff', '#7ee787', '#d29922', '#bc8cff', '#f85149'];
   c.setOption({
     ...THEME,
-    tooltip: { ...THEME.tooltip, trigger: 'axis', valueFormatter: (v: number) => '$' + v.toFixed(2) },
+    tooltip: { ...THEME.tooltip, trigger: 'axis', valueFormatter: (v: number) => tok(v) + ' tokens' },
     legend: { data: allKeys, textStyle: { color: '#9ba6b3', fontSize: 11 }, top: 0 },
-    grid: { left: 50, right: 18, top: 38, bottom: 30 },
+    grid: { left: 56, right: 18, top: 38, bottom: 30 },
     xAxis: { type: 'category', data: points.map(p => p.bucket), ...AXIS },
-    yAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: '${value}' }, splitLine: AXIS.splitLine, axisLine: { show: false } },
+    yAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: (v: number) => tok(v) }, splitLine: AXIS.splitLine, axisLine: { show: false } },
     series: allKeys.map((k, i) => ({
       type: 'line', name: k,
       smooth: true, symbol: 'circle', symbolSize: 5,
       lineStyle: { color: palette[i % palette.length], width: 2 },
       itemStyle: { color: palette[i % palette.length] },
-      data: points.map(p => +(p.groups[k]?.cost ?? 0).toFixed(4)),
+      data: points.map(p => p.groups[k]?.tokens ?? 0),
     })),
   });
   return c;

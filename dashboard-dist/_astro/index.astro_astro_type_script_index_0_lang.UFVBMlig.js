@@ -1,4 +1,4 @@
-import{a as c,e as d,t as p,u as w,n as b,s as L,b as N}from"./format.CgLh3UFa.js";import{l as C,c as A,m as M}from"./charts.C_St214A.js";const S=3e4;async function v(n){const t=n.closest(".card");let a=[];try{a=(await c.alerts(20)).alerts}catch{t&&(t.style.display="none");return}if(a.length===0){t&&(t.style.display="none");return}t&&(t.style.display=""),n.innerHTML=`<ul class="alerts">${a.map(o=>`
+import{a as c,e as d,t as p,u as w,n as b,s as L,b as N}from"./format.CgLh3UFa.js";import{l as C,c as A,m as M}from"./charts.CQF9QNgP.js";const S=3e4;async function v(n){const t=n.closest(".card");let a=[];try{a=(await c.alerts(20)).alerts}catch{t&&(t.style.display="none");return}if(a.length===0){t&&(t.style.display="none");return}t&&(t.style.display=""),n.innerHTML=`<ul class="alerts">${a.map(o=>`
     <li class="alert alert-${o.severity}">
       <div class="alert-head">
         <strong>${d(o.title)}</strong>
