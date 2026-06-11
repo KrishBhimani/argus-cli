@@ -10,7 +10,7 @@ from argus.schema.types import (
     TranscriptSegment,
     Turn,
 )
-from tests.conftest import alert_factory, session_factory
+from tests.conftest import alert_factory, session_factory, turn_factory
 
 # Sample row shared across tests (matches the TS SESSION/TURN constants).
 SAMPLE = Session(
@@ -588,3 +588,25 @@ def test_tool_call_stats_in_range_returns_per_tool_counts(repo):
     assert by_name["Bash"]["errors"] == 1
     assert by_name["Read"]["calls"] == 1
     assert by_name["Read"]["errors"] == 0
+
+
+# ─── Session timeline ─────────────────────────────────────────────────
+
+
+def _segment(uid: str, sid: str, *, role: str = "tool_result",
+             text: str = "boom", tool_use_id: str | None = None) -> TranscriptSegment:
+    return TranscriptSegment(
+        uid=uid, session_id=sid, timestamp="2026-05-01T00:00:01Z",
+        role=role, text=text, tool_use_id=tool_use_id,
+    )
+
+
+def test_upsert_segments_persists_tool_use_id(repo):
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    repo.upsert_transcript_segments(
+        [_segment("s1:u1:0", "s1", tool_use_id="toolu_abc")]
+    )
+    row = repo.db.execute(
+        "SELECT tool_use_id FROM transcript_segments WHERE uid = 's1:u1:0'"
+    ).fetchone()
+    assert row["tool_use_id"] == "toolu_abc"

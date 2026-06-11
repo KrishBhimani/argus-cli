@@ -528,17 +528,19 @@ class Repository:
                 "timestamp": r.timestamp,
                 "role": r.role,
                 "text": r.text,
+                "tool_use_id": r.tool_use_id,
             }
             for r in rows
         ]
         with self.db:
             self.db.executemany(
                 """
-                INSERT INTO transcript_segments (uid, session_id, timestamp, role, text)
-                VALUES (:uid, :session_id, :timestamp, :role, :text)
+                INSERT INTO transcript_segments (uid, session_id, timestamp, role, text, tool_use_id)
+                VALUES (:uid, :session_id, :timestamp, :role, :text, :tool_use_id)
                 ON CONFLICT(uid) DO UPDATE SET
                   session_id=excluded.session_id, timestamp=excluded.timestamp,
-                  role=excluded.role, text=excluded.text
+                  role=excluded.role, text=excluded.text,
+                  tool_use_id=excluded.tool_use_id
                 """,
                 params,
             )
