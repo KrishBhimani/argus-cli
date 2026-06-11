@@ -682,3 +682,32 @@ def test_session_timeline_failed_call_without_segment(repo):
 
 def test_session_timeline_unknown_session_is_empty(repo):
     assert repo.session_timeline("nope") == []
+
+
+def test_sessions_missing_tool_use_ids_finds_unlinked_tool_results(repo):
+    repo.upsert_session(session_factory("claude_code:a", "2026-05-01T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:b", "2026-05-02T00:00:00Z"))
+    # Session a: tool_result segment WITHOUT linkage (pre-upgrade rows).
+    repo.upsert_transcript_segments([
+        _segment("claude_code:a:u1:0", "claude_code:a", tool_use_id=None),
+    ])
+    # Session b: tool_result segment WITH linkage + an assistant segment
+    # (assistant/user/thinking rows always have NULL tool_use_id and must
+    # not flag the session).
+    repo.upsert_transcript_segments([
+        _segment("claude_code:b:u1:0", "claude_code:b", tool_use_id="tu_1"),
+        _segment("claude_code:b:u2:0", "claude_code:b", role="assistant",
+                 text="hi", tool_use_id=None),
+    ])
+    ids = [c["id"] for c in repo.sessions_missing_tool_use_ids(100)]
+    assert ids == ["claude_code:a"]
+
+
+def test_sessions_missing_tool_use_ids_collapses_subagents_to_parent(repo):
+    repo.upsert_session(session_factory("claude_code:p", "2026-05-01T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:p/sub", "2026-05-01T00:00:00Z"))
+    repo.upsert_transcript_segments([
+        _segment("claude_code:p/sub:u1:0", "claude_code:p/sub", tool_use_id=None),
+    ])
+    ids = [c["id"] for c in repo.sessions_missing_tool_use_ids(100)]
+    assert ids == ["claude_code:p"]

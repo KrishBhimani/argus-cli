@@ -75,3 +75,74 @@ def test_ingests_recent_files_in_foreground_older_in_background(tmp_path: Path, 
     s = handle.status()
     assert s.pending == 0
     assert s.processed == 2
+
+
+def test_backfill_fills_missing_tool_use_ids(tmp_path: Path, repo):
+    """Pre-upgrade transcript_segments rows (tool_use_id NULL) get relinked
+    by the startup backfill without wiping or re-enabling anything."""
+    from argus.collector.first_run import _backfill_missing_derived_data
+    from argus.collector.pipeline import ingest_file
+
+    claude_root = tmp_path / ".claude"
+    proj = claude_root / "projects" / "C--proj"
+    proj.mkdir(parents=True)
+    f = proj / "s1.jsonl"
+    assistant = {
+        "type": "assistant",
+        "sessionId": "s1",
+        "uuid": "ua",
+        "timestamp": "2026-05-01T00:00:00Z",
+        "cwd": "C:/proj",
+        "version": "2.1.94",
+        "userType": "external",
+        "entrypoint": "cli",
+        "message": {
+            "id": "m1",
+            "model": "claude-opus-4-7",
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "tu_x", "name": "Bash",
+                 "input": {"command": "ls"}},
+            ],
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        },
+    }
+    user = {
+        "type": "user",
+        "sessionId": "s1",
+        "uuid": "ub",
+        "timestamp": "2026-05-01T00:00:01Z",
+        "cwd": "C:/proj",
+        "message": {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "tu_x",
+                 "is_error": True, "content": "boom: exit 1"},
+            ],
+        },
+    }
+    f.write_text(json.dumps(assistant) + "\n" + json.dumps(user) + "\n",
+                 encoding="utf-8")
+
+    repo.set_search_indexing_enabled(True)
+    adapter = ClaudeCodeAdapter(claude_root)
+    table = load_pricing_table()
+    ingest_file(adapter, f, repo, table)
+
+    # Simulate rows written before the tool_use_id column existed.
+    with repo.db:
+        repo.db.execute("UPDATE transcript_segments SET tool_use_id = NULL")
+    assert [c["id"] for c in repo.sessions_missing_tool_use_ids(10)] == ["claude_code:s1"]
+
+    _backfill_missing_derived_data([adapter], repo, table)
+
+    row = repo.db.execute(
+        "SELECT tool_use_id FROM transcript_segments WHERE role = 'tool_result'"
+    ).fetchone()
+    assert row["tool_use_id"] == "tu_x"
+    assert repo.sessions_missing_tool_use_ids(10) == []

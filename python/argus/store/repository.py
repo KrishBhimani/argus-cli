@@ -616,6 +616,25 @@ class Repository:
         ).fetchone()
         return row["n"] if row else 0
 
+    def sessions_missing_tool_use_ids(self, limit: int) -> list[dict[str, Any]]:
+        """Sessions whose indexed tool_result segments predate the
+        tool_use_id column (NULL linkage). Sub-agent session ids collapse to
+        their parent so the backfill can re-ingest the parent file tree."""
+        rows = self.db.execute(
+            """
+            SELECT DISTINCT
+              CASE WHEN instr(ts.session_id, '/') > 0
+                   THEN substr(ts.session_id, 1, instr(ts.session_id, '/') - 1)
+                   ELSE ts.session_id END AS id
+            FROM transcript_segments ts
+            WHERE ts.role = 'tool_result' AND ts.tool_use_id IS NULL
+            ORDER BY id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
+
     def sessions_missing_segments(self, limit: int) -> list[dict[str, Any]]:
         rows = self.db.execute(
             """

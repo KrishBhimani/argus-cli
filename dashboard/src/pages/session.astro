@@ -322,7 +322,7 @@ import Default from '../layouts/Default.astro';
               : `<div class="sd-err-box">${escapeHtml(text)}</div>`;
           } else {
             errDetail = `<div class="sd-err-hint">${searchEnabled
-              ? 'error output not indexed yet — it will appear after the next full re-ingest'
+              ? 'error output not indexed yet — restart argus (or argusd) and reload'
               : 'enable search indexing in Settings to see error output'}</div>`;
           }
         }
