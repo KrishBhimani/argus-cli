@@ -302,8 +302,11 @@ import Default from '../layouts/Default.astro';
       btnTimeline.addEventListener('click', () => showTab('timeline'));
 
       // ─── Timeline tab ───────────────────────────────────────────────
-      const turnTokens = (t: TimelineTurn) =>
-        t.fresh_input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_write_tokens;
+      // "Burn" = tokens this turn actually generated/consumed at full rate.
+      // Cache reads are the rolling context window — monotonically growing
+      // and 20-50x larger, they'd drown the signal if charted directly.
+      const turnBurn = (t: TimelineTurn) =>
+        t.fresh_input_tokens + t.output_tokens;
 
       function toolRow(c: TimelineTurn['tool_calls'][number], searchEnabled: boolean): string {
         const status = c.is_error
@@ -342,31 +345,48 @@ import Default from '../layouts/Default.astro';
         timelinePane.innerHTML = `
           <div class="card" style="margin-bottom:1rem;">
             <div style="display:flex;justify-content:space-between;align-items:baseline;">
-              <h3 style="margin:0;">Tokens per turn</h3>
-              <span style="color:var(--text-2);font-size:0.75rem;">red = turn contains a failed tool call · click a bar to jump</span>
+              <h3 style="margin:0;">Fresh + output tokens per turn</h3>
+              <span style="color:var(--text-2);font-size:0.75rem;">red = turn contains a failed tool call · click a bar to jump · drag the slider to zoom</span>
             </div>
-            <div id="tl-chart" style="height:180px;margin-top:0.6rem;"></div>
+            <div id="tl-chart" style="height:200px;margin-top:0.6rem;"></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-bottom:0.6rem;">
+            <label style="color:var(--text-2);font-size:0.8rem;cursor:pointer;user-select:none;">
+              <input type="checkbox" id="tl-fail-only" style="vertical-align:-2px;" /> failures only
+            </label>
           </div>
           ${d.turns.map(t => `
-            <div class="card" id="tl-turn-${t.sequence}" style="margin-bottom:0.6rem;">
+            <div class="card tl-turn" data-fail="${t.tool_calls.some(c => c.is_error === 1) ? 1 : 0}" id="tl-turn-${t.sequence}" style="margin-bottom:0.6rem;">
               <div class="sd-turn-hdr">
                 <span>#${t.sequence} · ${fmtLocalTime(t.timestamp)} · <code>${escapeHtml(t.model)}</code></span>
-                <span><span class="tok">${tok(turnTokens(t))} tok</span> · <span class="cost">~${usd(t.cost_usd)}</span></span>
+                <span><span class="tok">${tok(turnBurn(t))} tok</span> <span style="color:var(--text-2);font-size:0.78rem;">· ${tok(t.cache_read_tokens)} cache read</span> · <span class="cost">~${usd(t.cost_usd)}</span></span>
               </div>
               ${t.tool_calls.length
                 ? t.tool_calls.map(c => toolRow(c, d.search_enabled)).join('')
                 : '<div class="sd-no-tools">no tools — text reply</div>'}
             </div>`).join('')}
+          <p id="tl-fail-empty" class="empty" style="display:none;">No failed tool calls in this session.</p>
         `;
         turnTokensBar(
           document.getElementById('tl-chart')!,
           d.turns.map(t => ({
             sequence: t.sequence,
-            tokens: turnTokens(t),
+            tokens: turnBurn(t),
+            cacheRead: t.cache_read_tokens,
             hasError: t.tool_calls.some(c => c.is_error === 1),
           })),
           seq => document.getElementById(`tl-turn-${seq}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
         );
+        const failOnly = document.getElementById('tl-fail-only') as HTMLInputElement;
+        failOnly.addEventListener('change', () => {
+          let visible = 0;
+          timelinePane.querySelectorAll<HTMLElement>('.tl-turn').forEach(el => {
+            const show = !failOnly.checked || el.dataset.fail === '1';
+            el.style.display = show ? '' : 'none';
+            if (show) visible++;
+          });
+          document.getElementById('tl-fail-empty')!.style.display = visible ? 'none' : '';
+        });
       }
     }
   </script>

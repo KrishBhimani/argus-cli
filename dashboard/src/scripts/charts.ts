@@ -1,10 +1,10 @@
 import * as echarts from 'echarts/core';
 import { LineChart, BarChart, HeatmapChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent } from 'echarts/components';
+import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent, DataZoomComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { tok } from './format';
 
-echarts.use([LineChart, BarChart, HeatmapChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent, CanvasRenderer]);
+echarts.use([LineChart, BarChart, HeatmapChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent, DataZoomComponent, CanvasRenderer]);
 
 const THEME = {
   textStyle: { color: '#9ba6b3', fontFamily: '-apple-system, system-ui, sans-serif' },
@@ -180,7 +180,7 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; value: num
 
 export function turnTokensBar(
   el: HTMLElement,
-  turns: { sequence: number; tokens: number; hasError: boolean }[],
+  turns: { sequence: number; tokens: number; cacheRead: number; hasError: boolean }[],
   onBarClick: (sequence: number) => void,
 ) {
   const c = makeChart(el);
@@ -191,12 +191,22 @@ export function turnTokensBar(
       trigger: 'item',
       formatter: (p: any) => {
         const t = turns[p.dataIndex];
-        return `Turn #${t.sequence}<br>${tok(t.tokens)} tokens${t.hasError ? '<br><span style="color:#f85149;">contains a failed tool call</span>' : ''}`;
+        return `Turn #${t.sequence}<br>${tok(t.tokens)} fresh + output<br><span style="color:#6b7585;">${tok(t.cacheRead)} cache read (context)</span>${t.hasError ? '<br><span style="color:#f85149;">contains a failed tool call</span>' : ''}`;
       },
     },
-    grid: { left: 50, right: 18, top: 12, bottom: 26 },
+    grid: { left: 50, right: 18, top: 12, bottom: 52 },
     xAxis: { type: 'category', data: turns.map(t => '#' + t.sequence), ...AXIS },
     yAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: (v: number) => tok(v) }, splitLine: AXIS.splitLine, axisLine: { show: false } },
+    dataZoom: [
+      { type: 'inside' },
+      {
+        type: 'slider', height: 16, bottom: 8,
+        borderColor: '#262d3a', backgroundColor: '#11151c',
+        fillerColor: 'rgba(88,166,255,0.15)',
+        handleStyle: { color: '#58a6ff' },
+        textStyle: { color: '#6b7585', fontSize: 9 },
+      },
+    ],
     series: [{
       type: 'bar',
       barMaxWidth: 26,
