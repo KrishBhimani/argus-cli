@@ -3,7 +3,14 @@ import Default from '../layouts/Default.astro';
 ---
 <Default title="Argus — Session">
   <p style="margin:0 0 1rem;"><a href="/sessions">← All sessions</a></p>
+  <div class="sd-tabs">
+    <button id="tab-btn-overview" class="sd-tab active" type="button">Overview</button>
+    <button id="tab-btn-timeline" class="sd-tab" type="button">Timeline</button>
+  </div>
   <div id="content">
+    <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
+  </div>
+  <div id="timeline-content" style="display:none;">
     <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
   </div>
 
@@ -50,10 +57,50 @@ import Default from '../layouts/Default.astro';
     .sd-role-pill.role-assistant   { background: rgba(88,166,255,0.16); color: var(--codex); }
     .sd-role-pill.role-thinking    { background: rgba(188,140,255,0.16); color: #bc8cff; }
     .sd-role-pill.role-tool_result { background: var(--bg-2); color: var(--text-2); }
+    .sd-tabs {
+      display: flex; gap: 0.4rem; margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .sd-tab {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-2); font: inherit; font-size: 0.9rem;
+      padding: 0.4rem 0.9rem; cursor: pointer;
+    }
+    .sd-tab.active { color: var(--text-0); border-bottom-color: var(--accent, #f0883e); }
+    .sd-turn-hdr {
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;
+      font-size: 0.85rem; margin-bottom: 0.4rem;
+    }
+    .sd-tool-row {
+      padding: 0.15rem 0 0.15rem 1.2rem; font-size: 0.84rem; color: var(--text-1);
+    }
+    .sd-tool-row .ok { color: var(--good); }
+    .sd-tool-row .fail { color: #f85149; font-weight: 600; }
+    .sd-tool-size { color: var(--text-2); font-size: 0.76rem; margin-left: 0.4rem; }
+    .sd-chip {
+      display: inline-block; background: rgba(188,140,255,0.16); color: #bc8cff;
+      border-radius: 4px; font-size: 0.7rem; padding: 0.05em 0.5em; margin-left: 0.4rem;
+    }
+    .sd-err-box {
+      margin: 0.25rem 0 0.5rem 1.2rem; background: rgba(248,81,73,0.08);
+      border: 1px solid rgba(248,81,73,0.4); border-radius: 4px;
+      padding: 0.35rem 0.6rem; font-size: 0.8rem; color: #f85149;
+    }
+    .sd-err-box pre {
+      margin: 0.4rem 0 0; white-space: pre-wrap; word-break: break-word;
+      color: var(--text-1); font-size: 0.78rem;
+    }
+    .sd-err-box summary { cursor: pointer; }
+    .sd-err-hint {
+      margin: 0.25rem 0 0.5rem 1.2rem; font-size: 0.78rem;
+      color: var(--text-2); font-style: italic;
+    }
+    .sd-no-tools { padding-left: 1.2rem; font-size: 0.8rem; color: var(--text-2); font-style: italic; }
   </style>
 
   <script>
-    import { api, type Turn } from '../scripts/api';
+    import { api, type Turn, type TimelineTurn } from '../scripts/api';
+    import { turnTokensBar } from '../scripts/charts';
     import { usd, tok, num, dur, escapeHtml } from '../scripts/format';
 
     const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -232,6 +279,95 @@ import Default from '../layouts/Default.astro';
           runSegSearch();
         }
       });
+
+      // ─── Tabs ───────────────────────────────────────────────────────
+      const overviewPane = document.getElementById('content')!;
+      const timelinePane = document.getElementById('timeline-content')!;
+      const btnOverview = document.getElementById('tab-btn-overview')!;
+      const btnTimeline = document.getElementById('tab-btn-timeline')!;
+      let timelineLoaded = false;
+
+      function showTab(tab: 'overview' | 'timeline') {
+        const onOverview = tab === 'overview';
+        overviewPane.style.display = onOverview ? '' : 'none';
+        timelinePane.style.display = onOverview ? 'none' : '';
+        btnOverview.classList.toggle('active', onOverview);
+        btnTimeline.classList.toggle('active', !onOverview);
+        if (!onOverview && !timelineLoaded) {
+          timelineLoaded = true;
+          loadTimeline();
+        }
+      }
+      btnOverview.addEventListener('click', () => showTab('overview'));
+      btnTimeline.addEventListener('click', () => showTab('timeline'));
+
+      // ─── Timeline tab ───────────────────────────────────────────────
+      const turnTokens = (t: TimelineTurn) =>
+        t.fresh_input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_write_tokens;
+
+      function toolRow(c: TimelineTurn['tool_calls'][number], searchEnabled: boolean): string {
+        const status = c.is_error
+          ? '<span class="fail">✗ failed</span>'
+          : '<span class="ok">✓</span>';
+        const chip = c.subagent_type
+          ? `<span class="sd-chip">${escapeHtml(c.subagent_type)}</span>` : '';
+        const size = `<span class="sd-tool-size">${(c.input_size / 1024).toFixed(1)} KB</span>`;
+        let errDetail = '';
+        if (c.is_error) {
+          if (c.error_text) {
+            const text = c.error_text;
+            const head = text.length > 200 ? text.slice(0, 200) + '…' : text;
+            errDetail = text.length > 200
+              ? `<details class="sd-err-box"><summary>${escapeHtml(head)}</summary><pre>${escapeHtml(text)}</pre></details>`
+              : `<div class="sd-err-box">${escapeHtml(text)}</div>`;
+          } else {
+            errDetail = `<div class="sd-err-hint">${searchEnabled
+              ? 'error output not indexed yet — it will appear after the next full re-ingest'
+              : 'enable search indexing in Settings to see error output'}</div>`;
+          }
+        }
+        return `<div class="sd-tool-row">▸ <b>${escapeHtml(c.tool_name)}</b>${chip}${size} ${status}</div>${errDetail}`;
+      }
+
+      async function loadTimeline() {
+        const d = await api.sessionTimeline(id!);
+        if (!d) {
+          timelinePane.innerHTML = '<p class="empty">Timeline unavailable.</p>';
+          return;
+        }
+        if (d.turns.length === 0) {
+          timelinePane.innerHTML = '<p class="empty">No turns recorded for this session.</p>';
+          return;
+        }
+        timelinePane.innerHTML = `
+          <div class="card" style="margin-bottom:1rem;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;">
+              <h3 style="margin:0;">Tokens per turn</h3>
+              <span style="color:var(--text-2);font-size:0.75rem;">red = turn contains a failed tool call · click a bar to jump</span>
+            </div>
+            <div id="tl-chart" style="height:180px;margin-top:0.6rem;"></div>
+          </div>
+          ${d.turns.map(t => `
+            <div class="card" id="tl-turn-${t.sequence}" style="margin-bottom:0.6rem;">
+              <div class="sd-turn-hdr">
+                <span>#${t.sequence} · ${fmtLocalTime(t.timestamp)} · <code>${escapeHtml(t.model)}</code></span>
+                <span><span class="tok">${tok(turnTokens(t))} tok</span> · <span class="cost">~${usd(t.cost_usd)}</span></span>
+              </div>
+              ${t.tool_calls.length
+                ? t.tool_calls.map(c => toolRow(c, d.search_enabled)).join('')
+                : '<div class="sd-no-tools">no tools — text reply</div>'}
+            </div>`).join('')}
+        `;
+        turnTokensBar(
+          document.getElementById('tl-chart')!,
+          d.turns.map(t => ({
+            sequence: t.sequence,
+            tokens: turnTokens(t),
+            hasError: t.tool_calls.some(c => c.is_error === 1),
+          })),
+          seq => document.getElementById(`tl-turn-${seq}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+        );
+      }
     }
   </script>
 </Default>
