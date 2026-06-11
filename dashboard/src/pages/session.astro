@@ -383,7 +383,15 @@ import Default from '../layouts/Default.astro';
         const CHUNK = 150;
         const cards = d.turns.map(cardHtml);
         let renderedCount = Math.min(cards.length, CHUNK);
+        const totalCalls = d.turns.reduce((n, t) => n + t.tool_calls.length, 0);
+        const failedCalls = d.turns.reduce((n, t) => n + t.tool_calls.filter(c => c.is_error === 1).length, 0);
+        const failedTurns = d.turns.filter(t => t.tool_calls.some(c => c.is_error === 1)).length;
         timelinePane.innerHTML = `
+          <div style="display:flex;gap:1.4rem;flex-wrap:wrap;margin-bottom:0.8rem;font-size:0.88rem;color:var(--text-1);">
+            <span><b>${num(d.turns.length)}</b> turns</span>
+            <span><b>${num(totalCalls)}</b> tool calls</span>
+            <span style="${failedCalls ? 'color:#f85149;' : ''}"><b>${num(failedCalls)}</b> failed${failedCalls ? ` <span style="color:var(--text-2);">across ${num(failedTurns)} turn${failedTurns === 1 ? '' : 's'}</span>` : ''}</span>
+          </div>
           <div class="card" style="margin-bottom:1rem;">
             <div style="display:flex;justify-content:space-between;align-items:baseline;">
               <h3 style="margin:0;">Fresh + output tokens per turn</h3>
