@@ -13,6 +13,7 @@ import Default from '../layouts/Default.astro';
   <div id="timeline-content" style="display:none;">
     <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
   </div>
+  <button id="to-top" type="button" title="Back to top">↑</button>
 
   <!--
     is:global so the styles apply to the result list we render via innerHTML
@@ -96,6 +97,25 @@ import Default from '../layouts/Default.astro';
       color: var(--text-2); font-style: italic;
     }
     .sd-no-tools { padding-left: 1.2rem; font-size: 0.8rem; color: var(--text-2); font-style: italic; }
+    .tl-expandable { cursor: pointer; }
+    .tl-expandable:hover b { color: var(--accent, #f0883e); }
+    .sd-out-box {
+      margin: 0.25rem 0 0.5rem 1.2rem; background: var(--bg-2);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 0.35rem 0.6rem; font-size: 0.78rem; color: var(--text-2);
+    }
+    .sd-out-box pre {
+      margin: 0; white-space: pre-wrap; word-break: break-word;
+      color: var(--text-1); max-height: 280px; overflow: auto;
+    }
+    #to-top {
+      position: fixed; right: 1.4rem; bottom: 1.4rem; z-index: 50;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: var(--bg-1); color: var(--text-1);
+      border: 1px solid var(--border); font-size: 1.1rem; cursor: pointer;
+      display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    #to-top:hover { color: var(--text-0); border-color: var(--accent, #f0883e); }
   </style>
 
   <script>
@@ -329,7 +349,13 @@ import Default from '../layouts/Default.astro';
               : 'enable search indexing in Settings to see error output'}</div>`;
           }
         }
-        return `<div class="sd-tool-row">▸ <b>${escapeHtml(c.tool_name)}</b>${chip}${size} ${status}</div>${errDetail}`;
+        // Rows without an inline error box expand on click to show the
+        // call's indexed output.
+        const expandable = !c.is_error;
+        const attrs = expandable
+          ? ` tl-expandable" data-tu="${escapeHtml(c.tool_use_id)}" title="click to show output`
+          : '';
+        return `<div class="sd-tool-row${attrs}">▸ <b>${escapeHtml(c.tool_name)}</b>${chip}${size} ${status}</div>${errDetail}`;
       }
 
       async function loadTimeline() {
@@ -387,7 +413,33 @@ import Default from '../layouts/Default.astro';
           });
           document.getElementById('tl-fail-empty')!.style.display = visible ? 'none' : '';
         });
+        // Click a successful tool call → lazily fetch + toggle its output.
+        timelinePane.addEventListener('click', async ev => {
+          const row = (ev.target as HTMLElement).closest<HTMLElement>('.tl-expandable');
+          if (!row) return;
+          const existing = row.nextElementSibling;
+          if (existing && existing.classList.contains('sd-out-box')) {
+            existing.remove();
+            return;
+          }
+          const box = document.createElement('div');
+          box.className = 'sd-out-box';
+          box.textContent = 'loading…';
+          row.after(box);
+          const r = await api.sessionToolOutput(id!, row.dataset.tu!);
+          if (!r) box.textContent = 'failed to load output';
+          else if (!r.search_enabled) box.textContent = 'enable search indexing in Settings to see tool output';
+          else if (!r.found) box.textContent = 'output not indexed — it may have been empty, or restart argus to backfill';
+          else box.innerHTML = `<pre>${escapeHtml(r.text!)}</pre>`;
+        });
       }
+
+      // ─── Back-to-top ──────────────────────────────────────────────────
+      const toTop = document.getElementById('to-top')!;
+      window.addEventListener('scroll', () => {
+        toTop.style.display = window.scrollY > 600 ? 'block' : 'none';
+      }, { passive: true });
+      toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
     }
   </script>
 </Default>

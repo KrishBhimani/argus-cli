@@ -319,3 +319,27 @@ def test_session_timeline_endpoint_shape(api_client, repo):
 def test_session_timeline_404_for_unknown_session(api_client):
     r = api_client.get("/api/sessions/nope/timeline")
     assert r.status_code == 404
+
+
+def test_session_tool_output_endpoint(api_client, repo):
+    from argus.schema.types import TranscriptSegment
+
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    repo.set_search_indexing_enabled(True)
+    repo.upsert_transcript_segments([
+        TranscriptSegment(uid="s1:u1:0", session_id="s1",
+                          timestamp="2026-05-01T00:00:01Z", role="tool_result",
+                          text="drwxr-xr-x 3 files", tool_use_id="tu_ls"),
+    ])
+
+    body = api_client.get("/api/sessions/s1/tool-output/tu_ls").json()
+    assert body == {"search_enabled": True, "found": True, "text": "drwxr-xr-x 3 files"}
+
+    body = api_client.get("/api/sessions/s1/tool-output/tu_nope").json()
+    assert body["found"] is False and body["text"] is None
+
+    repo.set_search_indexing_enabled(False)
+    body = api_client.get("/api/sessions/s1/tool-output/tu_ls").json()
+    assert body == {"search_enabled": False, "found": False, "text": None}
+
+    assert api_client.get("/api/sessions/ghost/tool-output/tu_ls").status_code == 404

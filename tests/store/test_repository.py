@@ -711,3 +711,19 @@ def test_sessions_missing_tool_use_ids_collapses_subagents_to_parent(repo):
     ])
     ids = [c["id"] for c in repo.sessions_missing_tool_use_ids(100)]
     assert ids == ["claude_code:p"]
+
+
+def test_tool_output_for_returns_linked_segment_text(repo):
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    repo.upsert_transcript_segments([
+        _segment("s1:u1:0", "s1", text="total 3 files", tool_use_id="tu_ls"),
+        _segment("s1:u2:0", "s1", role="assistant", text="reply"),
+    ])
+    assert repo.tool_output_for("s1", "tu_ls") == "total 3 files"
+    assert repo.tool_output_for("s1", "tu_missing") is None
+
+
+def test_session_timeline_calls_expose_tool_use_id(repo):
+    _timeline_fixture(repo)
+    tl = repo.session_timeline("s1")
+    assert [c["tool_use_id"] for c in tl[0]["tool_calls"]] == ["tu_read", "tu_bash"]

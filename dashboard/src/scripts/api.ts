@@ -36,6 +36,7 @@ export interface Turn {
 
 export interface TimelineToolCall {
   tool_name: string;
+  tool_use_id: string;
   is_error: 0 | 1;
   input_size: number;
   subagent_type: string | null;
@@ -101,6 +102,9 @@ export const api = {
   sessionTimeline: (id: string) =>
     fetch(`/api/sessions/${encodeURIComponent(id)}/timeline`)
       .then(r => r.ok ? r.json() as Promise<{ search_enabled: boolean; turns: TimelineTurn[] }> : null),
+  sessionToolOutput: (id: string, toolUseId: string) =>
+    fetch(`/api/sessions/${encodeURIComponent(id)}/tool-output/${encodeURIComponent(toolUseId)}`)
+      .then(r => r.ok ? r.json() as Promise<{ search_enabled: boolean; found: boolean; text: string | null }> : null),
   overview: (window: string) => fetch('/api/overview?window=' + window).then(r => r.json() as Promise<Overview>),
   trends: (granularity: string, groupBy: string) => fetch(`/api/trends?granularity=${granularity}&groupBy=${groupBy}`).then(r => r.json() as Promise<{ points: { bucket: string; groups: Record<string, { cost: number; tokens: number; sessions: number }> }[] }>),
   pricing: () => fetch('/api/pricing').then(r => r.json() as Promise<{ version: string }>),

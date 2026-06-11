@@ -246,6 +246,7 @@ class Repository:
             calls_by_turn.setdefault(r["turn_index"], []).append(
                 {
                     "tool_name": r["tool_name"],
+                    "tool_use_id": tu_id,
                     "is_error": r["is_error"],
                     "input_size": r["input_size"],
                     "subagent_type": r["subagent_type"],
@@ -615,6 +616,18 @@ class Repository:
             (session_id,),
         ).fetchone()
         return row["n"] if row else 0
+
+    def tool_output_for(self, session_id: str, tool_use_id: str) -> str | None:
+        """Indexed tool_result text for one call, or None if not indexed."""
+        row = self.db.execute(
+            """
+            SELECT text FROM transcript_segments
+            WHERE session_id = ? AND tool_use_id = ? AND role = 'tool_result'
+            LIMIT 1
+            """,
+            (session_id, tool_use_id),
+        ).fetchone()
+        return row["text"] if row else None
 
     def sessions_missing_tool_use_ids(self, limit: int) -> list[dict[str, Any]]:
         """Sessions whose indexed tool_result segments predate the
