@@ -288,3 +288,34 @@ def test_mark_alert_seen_marks_seen(api_client, repo):
 def test_mark_alert_seen_404_for_unknown_id(api_client):
     r = api_client.post("/api/alerts/99999/seen")
     assert r.status_code == 404
+
+
+def test_session_timeline_endpoint_shape(api_client, repo):
+    from argus.schema.types import ToolCall
+
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    repo.upsert_turn(turn_factory("s1:m0", "s1", "2026-05-01T00:00:00Z"))
+    repo.upsert_tool_calls([
+        ToolCall(id="s1:tu_1", session_id="s1", turn_index=0, tool_name="Bash",
+                 is_error=1, input_size=42, subagent_type=None,
+                 timestamp="2026-05-01T00:00:01Z"),
+    ])
+    repo.set_search_indexing_enabled(False)
+
+    r = api_client.get("/api/sessions/s1/timeline")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["search_enabled"] is False
+    assert len(body["turns"]) == 1
+    turn = body["turns"][0]
+    assert turn["sequence"] == 0
+    assert turn["cost_usd"] == 1.5
+    call = turn["tool_calls"][0]
+    assert call["tool_name"] == "Bash"
+    assert call["is_error"] == 1
+    assert call["error_text"] is None
+
+
+def test_session_timeline_404_for_unknown_session(api_client):
+    r = api_client.get("/api/sessions/nope/timeline")
+    assert r.status_code == 404

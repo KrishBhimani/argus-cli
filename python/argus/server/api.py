@@ -153,6 +153,15 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
         turns = [t.model_dump() for t in repo.get_turns_for_session(session_id)]
         return {"session": session.model_dump(), "turns": turns}
 
+    @api.get("/api/sessions/{session_id}/timeline")
+    def session_timeline(session_id: str) -> dict[str, Any]:
+        if repo.get_session(session_id) is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return {
+            "search_enabled": repo.is_search_indexing_enabled(),
+            "turns": repo.session_timeline(session_id),
+        }
+
     @api.get("/api/overview")
     def get_overview(window: str = "7d") -> dict[str, Any]:
         cutoff = _cutoff_iso_for_window(window)
