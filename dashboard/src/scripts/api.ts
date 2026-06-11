@@ -34,6 +34,26 @@ export interface Turn {
   metadata: Record<string, unknown>;
 }
 
+export interface TimelineToolCall {
+  tool_name: string;
+  is_error: 0 | 1;
+  input_size: number;
+  subagent_type: string | null;
+  error_text: string | null;
+}
+
+export interface TimelineTurn {
+  sequence: number;
+  timestamp: string;
+  model: string;
+  fresh_input_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  tool_calls: TimelineToolCall[];
+}
+
 export interface Overview {
   window: string;
   total_cost_usd: number;
@@ -78,6 +98,9 @@ export interface Alert {
 export const api = {
   sessions: (q = '') => fetch('/api/sessions' + q).then(r => r.json() as Promise<{ sessions: Session[] }>),
   session: (id: string) => fetch('/api/sessions/' + encodeURIComponent(id)).then(r => r.ok ? r.json() as Promise<{ session: Session; turns: Turn[] }> : null),
+  sessionTimeline: (id: string) =>
+    fetch(`/api/sessions/${encodeURIComponent(id)}/timeline`)
+      .then(r => r.ok ? r.json() as Promise<{ search_enabled: boolean; turns: TimelineTurn[] }> : null),
   overview: (window: string) => fetch('/api/overview?window=' + window).then(r => r.json() as Promise<Overview>),
   trends: (granularity: string, groupBy: string) => fetch(`/api/trends?granularity=${granularity}&groupBy=${groupBy}`).then(r => r.json() as Promise<{ points: { bucket: string; groups: Record<string, { cost: number; tokens: number; sessions: number }> }[] }>),
   pricing: () => fetch('/api/pricing').then(r => r.json() as Promise<{ version: string }>),

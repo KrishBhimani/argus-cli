@@ -178,6 +178,38 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; value: num
   return c;
 }
 
+export function turnTokensBar(
+  el: HTMLElement,
+  turns: { sequence: number; tokens: number; hasError: boolean }[],
+  onBarClick: (sequence: number) => void,
+) {
+  const c = makeChart(el);
+  c.setOption({
+    ...THEME,
+    tooltip: {
+      ...THEME.tooltip,
+      trigger: 'item',
+      formatter: (p: any) => {
+        const t = turns[p.dataIndex];
+        return `Turn #${t.sequence}<br>${tok(t.tokens)} tokens${t.hasError ? '<br><span style="color:#f85149;">contains a failed tool call</span>' : ''}`;
+      },
+    },
+    grid: { left: 50, right: 18, top: 12, bottom: 26 },
+    xAxis: { type: 'category', data: turns.map(t => '#' + t.sequence), ...AXIS },
+    yAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: (v: number) => tok(v) }, splitLine: AXIS.splitLine, axisLine: { show: false } },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 26,
+      data: turns.map(t => ({
+        value: t.tokens,
+        itemStyle: { color: t.hasError ? '#f85149' : '#58a6ff', borderRadius: [3, 3, 0, 0] },
+      })),
+    }],
+  });
+  c.on('click', (p: any) => onBarClick(turns[p.dataIndex].sequence));
+  return c;
+}
+
 export function trendsLine(el: HTMLElement, points: { bucket: string; groups: Record<string, { cost: number }> }[]) {
   const c = makeChart(el);
   const allKeys = [...new Set(points.flatMap(p => Object.keys(p.groups)))];
