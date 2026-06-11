@@ -186,6 +186,9 @@ export function turnTokensBar(
   const c = makeChart(el);
   c.setOption({
     ...THEME,
+    // Animating hundreds of bars on load and on every zoom drag visibly
+    // janks large sessions.
+    animation: turns.length <= 200,
     tooltip: {
       ...THEME.tooltip,
       trigger: 'item',

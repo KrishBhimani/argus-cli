@@ -368,6 +368,21 @@ import Default from '../layouts/Default.astro';
           timelinePane.innerHTML = '<p class="empty">No turns recorded for this session.</p>';
           return;
         }
+        const cardHtml = (t: TimelineTurn) => `
+            <div class="card tl-turn" data-fail="${t.tool_calls.some(c => c.is_error === 1) ? 1 : 0}" id="tl-turn-${t.sequence}" style="margin-bottom:0.6rem;">
+              <div class="sd-turn-hdr">
+                <span>#${t.sequence} · ${fmtLocalTime(t.timestamp)} · <code>${escapeHtml(t.model)}</code></span>
+                <span><span class="tok">${tok(turnBurn(t))} tok</span> <span style="color:var(--text-2);font-size:0.78rem;">· ${tok(t.cache_read_tokens)} cache read</span> · <span class="cost">~${usd(t.cost_usd)}</span></span>
+              </div>
+              ${t.tool_calls.length
+                ? t.tool_calls.map(c => toolRow(c, d.search_enabled)).join('')
+                : '<div class="sd-no-tools">no tools — text reply</div>'}
+            </div>`;
+        // Parsing one giant innerHTML for a 700-turn session visibly hangs
+        // the tab — render the first chunk, defer the rest behind a button.
+        const CHUNK = 150;
+        const cards = d.turns.map(cardHtml);
+        let renderedCount = Math.min(cards.length, CHUNK);
         timelinePane.innerHTML = `
           <div class="card" style="margin-bottom:1rem;">
             <div style="display:flex;justify-content:space-between;align-items:baseline;">
@@ -381,18 +396,31 @@ import Default from '../layouts/Default.astro';
               <input type="checkbox" id="tl-fail-only" style="vertical-align:-2px;" /> failures only
             </label>
           </div>
-          ${d.turns.map(t => `
-            <div class="card tl-turn" data-fail="${t.tool_calls.some(c => c.is_error === 1) ? 1 : 0}" id="tl-turn-${t.sequence}" style="margin-bottom:0.6rem;">
-              <div class="sd-turn-hdr">
-                <span>#${t.sequence} · ${fmtLocalTime(t.timestamp)} · <code>${escapeHtml(t.model)}</code></span>
-                <span><span class="tok">${tok(turnBurn(t))} tok</span> <span style="color:var(--text-2);font-size:0.78rem;">· ${tok(t.cache_read_tokens)} cache read</span> · <span class="cost">~${usd(t.cost_usd)}</span></span>
-              </div>
-              ${t.tool_calls.length
-                ? t.tool_calls.map(c => toolRow(c, d.search_enabled)).join('')
-                : '<div class="sd-no-tools">no tools — text reply</div>'}
-            </div>`).join('')}
+          <div id="tl-feed">${cards.slice(0, renderedCount).join('')}</div>
+          ${cards.length > CHUNK ? `<button id="tl-more" type="button" style="width:100%;background:none;color:var(--text-2);border:1px dashed var(--border);border-radius:6px;padding:0.5rem;font:inherit;font-size:0.85rem;cursor:pointer;">Show remaining ${cards.length - CHUNK} turns</button>` : ''}
           <p id="tl-fail-empty" class="empty" style="display:none;">No failed tool calls in this session.</p>
         `;
+        const failOnly = document.getElementById('tl-fail-only') as HTMLInputElement;
+        function applyFailFilter() {
+          let visible = 0;
+          timelinePane.querySelectorAll<HTMLElement>('.tl-turn').forEach(el => {
+            const show = !failOnly.checked || el.dataset.fail === '1';
+            el.style.display = show ? '' : 'none';
+            if (show) visible++;
+          });
+          document.getElementById('tl-fail-empty')!.style.display = visible ? 'none' : '';
+        }
+        function renderRest() {
+          if (renderedCount >= cards.length) return;
+          document.getElementById('tl-feed')!.insertAdjacentHTML('beforeend', cards.slice(renderedCount).join(''));
+          renderedCount = cards.length;
+          document.getElementById('tl-more')?.remove();
+        }
+        document.getElementById('tl-more')?.addEventListener('click', renderRest);
+        failOnly.addEventListener('change', () => {
+          if (failOnly.checked) renderRest(); // a filter over a partial feed would lie
+          applyFailFilter();
+        });
         turnTokensBar(
           document.getElementById('tl-chart')!,
           d.turns.map(t => ({
@@ -401,18 +429,11 @@ import Default from '../layouts/Default.astro';
             cacheRead: t.cache_read_tokens,
             hasError: t.tool_calls.some(c => c.is_error === 1),
           })),
-          seq => document.getElementById(`tl-turn-${seq}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+          seq => {
+            if (!document.getElementById(`tl-turn-${seq}`)) renderRest();
+            document.getElementById(`tl-turn-${seq}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          },
         );
-        const failOnly = document.getElementById('tl-fail-only') as HTMLInputElement;
-        failOnly.addEventListener('change', () => {
-          let visible = 0;
-          timelinePane.querySelectorAll<HTMLElement>('.tl-turn').forEach(el => {
-            const show = !failOnly.checked || el.dataset.fail === '1';
-            el.style.display = show ? '' : 'none';
-            if (show) visible++;
-          });
-          document.getElementById('tl-fail-empty')!.style.display = visible ? 'none' : '';
-        });
         // Click a successful tool call → lazily fetch + toggle its output.
         timelinePane.addEventListener('click', async ev => {
           const row = (ev.target as HTMLElement).closest<HTMLElement>('.tl-expandable');
@@ -436,8 +457,13 @@ import Default from '../layouts/Default.astro';
 
       // ─── Back-to-top ──────────────────────────────────────────────────
       const toTop = document.getElementById('to-top')!;
+      let toTopVisible = false;
       window.addEventListener('scroll', () => {
-        toTop.style.display = window.scrollY > 600 ? 'block' : 'none';
+        const v = window.scrollY > 600;
+        if (v !== toTopVisible) { // style write per scroll event janks big DOMs
+          toTopVisible = v;
+          toTop.style.display = v ? 'block' : 'none';
+        }
       }, { passive: true });
       toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
     }
