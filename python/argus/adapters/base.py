@@ -49,6 +49,7 @@ class RawSegment(BaseModel):
     timestamp: str
     role: str  # 'user' | 'assistant' | 'thinking' | 'tool_result'
     text: str
+    tool_use_id: str | None = None  # set on role='tool_result' only
 
 
 class AdapterIngestResult(BaseModel):

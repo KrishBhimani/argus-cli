@@ -3,9 +3,17 @@ import Default from '../layouts/Default.astro';
 ---
 <Default title="Argus — Session">
   <p style="margin:0 0 1rem;"><a href="/sessions">← All sessions</a></p>
+  <div class="sd-tabs">
+    <button id="tab-btn-overview" class="sd-tab active" type="button">Overview</button>
+    <button id="tab-btn-timeline" class="sd-tab" type="button">Timeline</button>
+  </div>
   <div id="content">
     <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
   </div>
+  <div id="timeline-content" style="display:none;">
+    <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
+  </div>
+  <button id="to-top" type="button" title="Back to top">↑</button>
 
   <!--
     is:global so the styles apply to the result list we render via innerHTML
@@ -50,10 +58,69 @@ import Default from '../layouts/Default.astro';
     .sd-role-pill.role-assistant   { background: rgba(88,166,255,0.16); color: var(--codex); }
     .sd-role-pill.role-thinking    { background: rgba(188,140,255,0.16); color: #bc8cff; }
     .sd-role-pill.role-tool_result { background: var(--bg-2); color: var(--text-2); }
+    .sd-tabs {
+      display: flex; gap: 0.4rem; margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .sd-tab {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-2); font: inherit; font-size: 0.9rem;
+      padding: 0.4rem 0.9rem; cursor: pointer;
+    }
+    .sd-tab.active { color: var(--text-0); border-bottom-color: var(--accent, #f0883e); }
+    .sd-turn-hdr {
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;
+      font-size: 0.85rem; margin-bottom: 0.4rem;
+    }
+    .sd-tool-row {
+      padding: 0.15rem 0 0.15rem 1.2rem; font-size: 0.84rem; color: var(--text-1);
+    }
+    .sd-tool-row .ok { color: var(--good); }
+    .sd-tool-row .fail { color: #f85149; font-weight: 600; }
+    .sd-tool-size { color: var(--text-2); font-size: 0.76rem; margin-left: 0.4rem; }
+    .sd-chip {
+      display: inline-block; background: rgba(188,140,255,0.16); color: #bc8cff;
+      border-radius: 4px; font-size: 0.7rem; padding: 0.05em 0.5em; margin-left: 0.4rem;
+    }
+    .sd-err-box {
+      margin: 0.25rem 0 0.5rem 1.2rem; background: rgba(248,81,73,0.08);
+      border: 1px solid rgba(248,81,73,0.4); border-radius: 4px;
+      padding: 0.35rem 0.6rem; font-size: 0.8rem; color: #f85149;
+    }
+    .sd-err-box pre {
+      margin: 0.4rem 0 0; white-space: pre-wrap; word-break: break-word;
+      color: var(--text-1); font-size: 0.78rem;
+    }
+    .sd-err-box summary { cursor: pointer; }
+    .sd-err-hint {
+      margin: 0.25rem 0 0.5rem 1.2rem; font-size: 0.78rem;
+      color: var(--text-2); font-style: italic;
+    }
+    .sd-no-tools { padding-left: 1.2rem; font-size: 0.8rem; color: var(--text-2); font-style: italic; }
+    .tl-expandable { cursor: pointer; }
+    .tl-expandable:hover b { color: var(--accent, #f0883e); }
+    .sd-out-box {
+      margin: 0.25rem 0 0.5rem 1.2rem; background: var(--bg-2);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 0.35rem 0.6rem; font-size: 0.78rem; color: var(--text-2);
+    }
+    .sd-out-box pre {
+      margin: 0; white-space: pre-wrap; word-break: break-word;
+      color: var(--text-1); max-height: 280px; overflow: auto;
+    }
+    #to-top {
+      position: fixed; right: 1.4rem; bottom: 1.4rem; z-index: 50;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: var(--bg-1); color: var(--text-1);
+      border: 1px solid var(--border); font-size: 1.1rem; cursor: pointer;
+      display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    #to-top:hover { color: var(--text-0); border-color: var(--accent, #f0883e); }
   </style>
 
   <script>
-    import { api, type Turn } from '../scripts/api';
+    import { api, type Turn, type TimelineTurn } from '../scripts/api';
+    import { turnTokensBar } from '../scripts/charts';
     import { usd, tok, num, dur, escapeHtml } from '../scripts/format';
 
     const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -232,6 +299,181 @@ import Default from '../layouts/Default.astro';
           runSegSearch();
         }
       });
+
+      // ─── Tabs ───────────────────────────────────────────────────────
+      const overviewPane = document.getElementById('content')!;
+      const timelinePane = document.getElementById('timeline-content')!;
+      const btnOverview = document.getElementById('tab-btn-overview')!;
+      const btnTimeline = document.getElementById('tab-btn-timeline')!;
+      let timelineLoaded = false;
+
+      function showTab(tab: 'overview' | 'timeline') {
+        const onOverview = tab === 'overview';
+        overviewPane.style.display = onOverview ? '' : 'none';
+        timelinePane.style.display = onOverview ? 'none' : '';
+        btnOverview.classList.toggle('active', onOverview);
+        btnTimeline.classList.toggle('active', !onOverview);
+        if (!onOverview && !timelineLoaded) {
+          timelineLoaded = true;
+          loadTimeline();
+        }
+      }
+      btnOverview.addEventListener('click', () => showTab('overview'));
+      btnTimeline.addEventListener('click', () => showTab('timeline'));
+
+      // ─── Timeline tab ───────────────────────────────────────────────
+      // "Burn" = tokens this turn actually generated/consumed at full rate.
+      // Cache reads are the rolling context window — monotonically growing
+      // and 20-50x larger, they'd drown the signal if charted directly.
+      const turnBurn = (t: TimelineTurn) =>
+        t.fresh_input_tokens + t.output_tokens;
+
+      function toolRow(c: TimelineTurn['tool_calls'][number], searchEnabled: boolean): string {
+        const status = c.is_error
+          ? '<span class="fail">✗ failed</span>'
+          : '<span class="ok">✓</span>';
+        const chip = c.subagent_type
+          ? `<span class="sd-chip">${escapeHtml(c.subagent_type)}</span>` : '';
+        const size = `<span class="sd-tool-size">${(c.input_size / 1024).toFixed(1)} KB</span>`;
+        let errDetail = '';
+        if (c.is_error) {
+          if (c.error_text) {
+            const text = c.error_text;
+            const head = text.length > 200 ? text.slice(0, 200) + '…' : text;
+            errDetail = text.length > 200
+              ? `<details class="sd-err-box"><summary>${escapeHtml(head)}</summary><pre>${escapeHtml(text)}</pre></details>`
+              : `<div class="sd-err-box">${escapeHtml(text)}</div>`;
+          } else {
+            errDetail = `<div class="sd-err-hint">${searchEnabled
+              ? 'error output not indexed yet — restart argus (or argusd) and reload'
+              : 'enable search indexing in Settings to see error output'}</div>`;
+          }
+        }
+        // Rows without an inline error box expand on click to show the
+        // call's indexed output.
+        const expandable = !c.is_error;
+        const attrs = expandable
+          ? ` tl-expandable" data-tu="${escapeHtml(c.tool_use_id)}" title="click to show output`
+          : '';
+        return `<div class="sd-tool-row${attrs}">▸ <b>${escapeHtml(c.tool_name)}</b>${chip}${size} ${status}</div>${errDetail}`;
+      }
+
+      async function loadTimeline() {
+        const d = await api.sessionTimeline(id!);
+        if (!d) {
+          timelinePane.innerHTML = '<p class="empty">Timeline unavailable.</p>';
+          return;
+        }
+        if (d.turns.length === 0) {
+          timelinePane.innerHTML = '<p class="empty">No turns recorded for this session.</p>';
+          return;
+        }
+        const cardHtml = (t: TimelineTurn) => `
+            <div class="card tl-turn" data-fail="${t.tool_calls.some(c => c.is_error === 1) ? 1 : 0}" id="tl-turn-${t.sequence}" style="margin-bottom:0.6rem;">
+              <div class="sd-turn-hdr">
+                <span>#${t.sequence} · ${fmtLocalTime(t.timestamp)} · <code>${escapeHtml(t.model)}</code></span>
+                <span><span class="tok">${tok(turnBurn(t))} tok</span> <span style="color:var(--text-2);font-size:0.78rem;">· ${tok(t.cache_read_tokens)} cache read</span> · <span class="cost">~${usd(t.cost_usd)}</span></span>
+              </div>
+              ${t.tool_calls.length
+                ? t.tool_calls.map(c => toolRow(c, d.search_enabled)).join('')
+                : '<div class="sd-no-tools">no tools — text reply</div>'}
+            </div>`;
+        // Parsing one giant innerHTML for a 700-turn session visibly hangs
+        // the tab — render the first chunk, defer the rest behind a button.
+        const CHUNK = 150;
+        const cards = d.turns.map(cardHtml);
+        let renderedCount = Math.min(cards.length, CHUNK);
+        const totalCalls = d.turns.reduce((n, t) => n + t.tool_calls.length, 0);
+        const failedCalls = d.turns.reduce((n, t) => n + t.tool_calls.filter(c => c.is_error === 1).length, 0);
+        const failedTurns = d.turns.filter(t => t.tool_calls.some(c => c.is_error === 1)).length;
+        timelinePane.innerHTML = `
+          <div style="display:flex;gap:1.4rem;flex-wrap:wrap;margin-bottom:0.8rem;font-size:0.88rem;color:var(--text-1);">
+            <span><b>${num(d.turns.length)}</b> turns</span>
+            <span><b>${num(totalCalls)}</b> tool calls</span>
+            <span style="${failedCalls ? 'color:#f85149;' : ''}"><b>${num(failedCalls)}</b> failed${failedCalls ? ` <span style="color:var(--text-2);">across ${num(failedTurns)} turn${failedTurns === 1 ? '' : 's'}</span>` : ''}</span>
+          </div>
+          <div class="card" style="margin-bottom:1rem;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;">
+              <h3 style="margin:0;">Fresh + output tokens per turn</h3>
+              <span style="color:var(--text-2);font-size:0.75rem;">red = turn contains a failed tool call · click a bar to jump · drag the slider to zoom</span>
+            </div>
+            <div id="tl-chart" style="height:200px;margin-top:0.6rem;"></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-bottom:0.6rem;">
+            <label style="color:var(--text-2);font-size:0.8rem;cursor:pointer;user-select:none;">
+              <input type="checkbox" id="tl-fail-only" style="vertical-align:-2px;" /> failures only
+            </label>
+          </div>
+          <div id="tl-feed">${cards.slice(0, renderedCount).join('')}</div>
+          ${cards.length > CHUNK ? `<button id="tl-more" type="button" style="width:100%;background:none;color:var(--text-2);border:1px dashed var(--border);border-radius:6px;padding:0.5rem;font:inherit;font-size:0.85rem;cursor:pointer;">Show remaining ${cards.length - CHUNK} turns</button>` : ''}
+          <p id="tl-fail-empty" class="empty" style="display:none;">No failed tool calls in this session.</p>
+        `;
+        const failOnly = document.getElementById('tl-fail-only') as HTMLInputElement;
+        function applyFailFilter() {
+          let visible = 0;
+          timelinePane.querySelectorAll<HTMLElement>('.tl-turn').forEach(el => {
+            const show = !failOnly.checked || el.dataset.fail === '1';
+            el.style.display = show ? '' : 'none';
+            if (show) visible++;
+          });
+          document.getElementById('tl-fail-empty')!.style.display = visible ? 'none' : '';
+        }
+        function renderRest() {
+          if (renderedCount >= cards.length) return;
+          document.getElementById('tl-feed')!.insertAdjacentHTML('beforeend', cards.slice(renderedCount).join(''));
+          renderedCount = cards.length;
+          document.getElementById('tl-more')?.remove();
+        }
+        document.getElementById('tl-more')?.addEventListener('click', renderRest);
+        failOnly.addEventListener('change', () => {
+          if (failOnly.checked) renderRest(); // a filter over a partial feed would lie
+          applyFailFilter();
+        });
+        turnTokensBar(
+          document.getElementById('tl-chart')!,
+          d.turns.map(t => ({
+            sequence: t.sequence,
+            tokens: turnBurn(t),
+            cacheRead: t.cache_read_tokens,
+            hasError: t.tool_calls.some(c => c.is_error === 1),
+          })),
+          seq => {
+            if (!document.getElementById(`tl-turn-${seq}`)) renderRest();
+            document.getElementById(`tl-turn-${seq}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          },
+        );
+        // Click a successful tool call → lazily fetch + toggle its output.
+        timelinePane.addEventListener('click', async ev => {
+          const row = (ev.target as HTMLElement).closest<HTMLElement>('.tl-expandable');
+          if (!row) return;
+          const existing = row.nextElementSibling;
+          if (existing && existing.classList.contains('sd-out-box')) {
+            existing.remove();
+            return;
+          }
+          const box = document.createElement('div');
+          box.className = 'sd-out-box';
+          box.textContent = 'loading…';
+          row.after(box);
+          const r = await api.sessionToolOutput(id!, row.dataset.tu!);
+          if (!r) box.textContent = 'failed to load output';
+          else if (!r.search_enabled) box.textContent = 'enable search indexing in Settings to see tool output';
+          else if (!r.found) box.textContent = 'output not indexed — it may have been empty, or restart argus to backfill';
+          else box.innerHTML = `<pre>${escapeHtml(r.text!)}</pre>`;
+        });
+      }
+
+      // ─── Back-to-top ──────────────────────────────────────────────────
+      const toTop = document.getElementById('to-top')!;
+      let toTopVisible = false;
+      window.addEventListener('scroll', () => {
+        const v = window.scrollY > 600;
+        if (v !== toTopVisible) { // style write per scroll event janks big DOMs
+          toTopVisible = v;
+          toTop.style.display = v ? 'block' : 'none';
+        }
+      }, { passive: true });
+      toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
     }
   </script>
 </Default>

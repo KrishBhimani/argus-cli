@@ -10,7 +10,7 @@ from argus.schema.types import (
     TranscriptSegment,
     Turn,
 )
-from tests.conftest import alert_factory, session_factory
+from tests.conftest import alert_factory, session_factory, turn_factory
 
 # Sample row shared across tests (matches the TS SESSION/TURN constants).
 SAMPLE = Session(
@@ -588,3 +588,177 @@ def test_tool_call_stats_in_range_returns_per_tool_counts(repo):
     assert by_name["Bash"]["errors"] == 1
     assert by_name["Read"]["calls"] == 1
     assert by_name["Read"]["errors"] == 0
+
+
+# ─── Session timeline ─────────────────────────────────────────────────
+
+
+def _segment(uid: str, sid: str, *, role: str = "tool_result",
+             text: str = "boom", tool_use_id: str | None = None) -> TranscriptSegment:
+    return TranscriptSegment(
+        uid=uid, session_id=sid, timestamp="2026-05-01T00:00:01Z",
+        role=role, text=text, tool_use_id=tool_use_id,
+    )
+
+
+def test_upsert_segments_persists_tool_use_id(repo):
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    repo.upsert_transcript_segments(
+        [_segment("s1:u1:0", "s1", tool_use_id="toolu_abc")]
+    )
+    row = repo.db.execute(
+        "SELECT tool_use_id FROM transcript_segments WHERE uid = 's1:u1:0'"
+    ).fetchone()
+    assert row["tool_use_id"] == "toolu_abc"
+
+
+def _tool_call(sid: str, tool_use_id: str, *, turn_index: int = 0,
+               tool_name: str = "Bash", is_error: int = 0,
+               subagent_type: str | None = None,
+               ts: str = "2026-05-01T00:00:01Z") -> ToolCall:
+    return ToolCall(
+        id=f"{sid}:{tool_use_id}", session_id=sid, turn_index=turn_index,
+        tool_name=tool_name, is_error=is_error, input_size=42,
+        subagent_type=subagent_type, timestamp=ts,
+    )
+
+
+def _timeline_fixture(repo):
+    """Session with 2 turns; turn 0 has an ok Read + failed Bash, turn 1 has none."""
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    t0 = turn_factory("s1:m0", "s1", "2026-05-01T00:00:00Z")
+    t1 = turn_factory("s1:m1", "s1", "2026-05-01T00:00:05Z").model_copy(
+        update={"sequence": 1}
+    )
+    repo.upsert_turn(t0)
+    repo.upsert_turn(t1)
+    repo.upsert_tool_calls([
+        _tool_call("s1", "tu_read", tool_name="Read"),
+        _tool_call("s1", "tu_bash", tool_name="Bash", is_error=1,
+                   ts="2026-05-01T00:00:02Z"),
+    ])
+
+
+def test_session_timeline_nests_calls_under_turns(repo):
+    _timeline_fixture(repo)
+    tl = repo.session_timeline("s1")
+    assert [t["sequence"] for t in tl] == [0, 1]
+    assert [c["tool_name"] for c in tl[0]["tool_calls"]] == ["Read", "Bash"]
+    assert tl[1]["tool_calls"] == []
+    assert tl[0]["cost_usd"] == 1.5
+    assert tl[0]["fresh_input_tokens"] == 100
+
+
+def test_session_timeline_attaches_error_text_when_indexed(repo):
+    _timeline_fixture(repo)
+    repo.set_search_indexing_enabled(True)
+    repo.upsert_transcript_segments([
+        _segment("s1:u9:0", "s1", text="FAILED: exit 1", tool_use_id="tu_bash"),
+    ])
+    tl = repo.session_timeline("s1")
+    bash = tl[0]["tool_calls"][1]
+    assert bash["is_error"] == 1
+    assert bash["error_text"] == "FAILED: exit 1"
+    # Non-failing calls never get error_text, even if a segment matched.
+    assert tl[0]["tool_calls"][0]["error_text"] is None
+
+
+def test_session_timeline_no_error_text_when_indexing_off(repo):
+    _timeline_fixture(repo)
+    repo.set_search_indexing_enabled(False)
+    repo.upsert_transcript_segments([
+        _segment("s1:u9:0", "s1", text="FAILED: exit 1", tool_use_id="tu_bash"),
+    ])
+    tl = repo.session_timeline("s1")
+    assert tl[0]["tool_calls"][1]["error_text"] is None
+
+
+def test_session_timeline_failed_call_without_segment(repo):
+    _timeline_fixture(repo)
+    repo.set_search_indexing_enabled(True)  # indexed, but no matching segment
+    tl = repo.session_timeline("s1")
+    assert tl[0]["tool_calls"][1]["error_text"] is None
+
+
+def test_session_timeline_unknown_session_is_empty(repo):
+    assert repo.session_timeline("nope") == []
+
+
+def test_sessions_missing_tool_use_ids_finds_unlinked_tool_results(repo):
+    repo.upsert_session(session_factory("claude_code:a", "2026-05-01T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:b", "2026-05-02T00:00:00Z"))
+    # Session a: tool_result segment WITHOUT linkage (pre-upgrade rows).
+    repo.upsert_transcript_segments([
+        _segment("claude_code:a:u1:0", "claude_code:a", tool_use_id=None),
+    ])
+    # Session b: tool_result segment WITH linkage + an assistant segment
+    # (assistant/user/thinking rows always have NULL tool_use_id and must
+    # not flag the session).
+    repo.upsert_transcript_segments([
+        _segment("claude_code:b:u1:0", "claude_code:b", tool_use_id="tu_1"),
+        _segment("claude_code:b:u2:0", "claude_code:b", role="assistant",
+                 text="hi", tool_use_id=None),
+    ])
+    ids = [c["id"] for c in repo.sessions_missing_tool_use_ids(100)]
+    assert ids == ["claude_code:a"]
+
+
+def test_sessions_missing_tool_use_ids_collapses_subagents_to_parent(repo):
+    repo.upsert_session(session_factory("claude_code:p", "2026-05-01T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:p/sub", "2026-05-01T00:00:00Z"))
+    repo.upsert_transcript_segments([
+        _segment("claude_code:p/sub:u1:0", "claude_code:p/sub", tool_use_id=None),
+    ])
+    ids = [c["id"] for c in repo.sessions_missing_tool_use_ids(100)]
+    assert ids == ["claude_code:p"]
+
+
+def test_tool_output_for_returns_linked_segment_text(repo):
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    repo.upsert_transcript_segments([
+        _segment("s1:u1:0", "s1", text="total 3 files", tool_use_id="tu_ls"),
+        _segment("s1:u2:0", "s1", role="assistant", text="reply"),
+    ])
+    assert repo.tool_output_for("s1", "tu_ls") == "total 3 files"
+    assert repo.tool_output_for("s1", "tu_missing") is None
+
+
+def test_session_timeline_calls_expose_tool_use_id(repo):
+    _timeline_fixture(repo)
+    tl = repo.session_timeline("s1")
+    assert [c["tool_use_id"] for c in tl[0]["tool_calls"]] == ["tu_read", "tu_bash"]
+
+
+def test_sessions_with_unpriced_turns_finds_zero_cost_priced_models(repo):
+    repo.upsert_session(session_factory("claude_code:a", "2026-05-01T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:b", "2026-05-02T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:c", "2026-05-03T00:00:00Z"))
+    # a: zero-cost turn on a model the table NOW prices -> needs repricing.
+    repo.upsert_turn(turn_factory("a:m0", "claude_code:a", "2026-05-01T00:00:00Z",
+                                  cost=0.0, model="claude-fable-5"))
+    # b: zero-cost turn on a model the table still does not price -> skip
+    # (would otherwise re-ingest every startup forever).
+    repo.upsert_turn(turn_factory("b:m0", "claude_code:b", "2026-05-02T00:00:00Z",
+                                  cost=0.0, model="mystery-model"))
+    # c: already-priced turn -> skip.
+    repo.upsert_turn(turn_factory("c:m0", "claude_code:c", "2026-05-03T00:00:00Z",
+                                  cost=1.5, model="claude-fable-5"))
+    ids = [r["id"] for r in repo.sessions_with_unpriced_turns(
+        ["claude-fable-5", "claude-opus-4-8"], 100)]
+    assert ids == ["claude_code:a"]
+
+
+def test_sessions_with_unpriced_turns_collapses_subagents_to_parent(repo):
+    repo.upsert_session(session_factory("claude_code:p", "2026-05-01T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:p/sub", "2026-05-01T00:00:00Z"))
+    repo.upsert_turn(turn_factory("ps:m0", "claude_code:p/sub", "2026-05-01T00:00:00Z",
+                                  cost=0.0, model="claude-fable-5"))
+    ids = [r["id"] for r in repo.sessions_with_unpriced_turns(["claude-fable-5"], 100)]
+    assert ids == ["claude_code:p"]
+
+
+def test_sessions_with_unpriced_turns_ignores_tokenless_turns(repo):
+    repo.upsert_session(session_factory("claude_code:a", "2026-05-01T00:00:00Z"))
+    repo.upsert_turn(turn_factory("a:m0", "claude_code:a", "2026-05-01T00:00:00Z",
+                                  cost=0.0, fresh=0, output=0, model="claude-fable-5"))
+    assert repo.sessions_with_unpriced_turns(["claude-fable-5"], 100) == []

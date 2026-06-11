@@ -55,6 +55,7 @@ def _to_segment(r: RawSegment, session_id: str) -> TranscriptSegment:
         timestamp=r.timestamp,
         role=r.role,  # type: ignore[arg-type]
         text=r.text,
+        tool_use_id=r.tool_use_id,
     )
 
 

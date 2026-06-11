@@ -97,6 +97,7 @@ def extract_transcript_segments(
                             if isinstance(t, str):
                                 parts.append(t)
                     combined = "\n".join(p for p in parts if p)
+                tu_id = block.get("tool_use_id")
                 if combined.strip():
                     out.append(
                         RawSegment(
@@ -104,6 +105,7 @@ def extract_transcript_segments(
                             timestamp=line.timestamp,
                             role="tool_result",
                             text=_cap_text(combined),
+                            tool_use_id=tu_id if isinstance(tu_id, str) else None,
                         )
                     )
             block_idx += 1

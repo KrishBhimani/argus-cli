@@ -150,3 +150,26 @@ def test_preserves_chronological_pairing_across_both_lists():
     by_role = {s.role: s for s in segs}
     assert by_role["user"].timestamp == "2026-05-01T00:00:00Z"
     assert by_role["assistant"].timestamp == "2026-05-01T00:00:01Z"
+
+
+def test_tool_result_segments_carry_tool_use_id():
+    segs = extract_transcript_segments(
+        [_mk_assistant("a1", [{"type": "text", "text": "reply"}])],
+        [
+            _mk_user(
+                "u1",
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_abc",
+                        "is_error": True,
+                        "content": "FAILED: assertion error",
+                    }
+                ],
+            )
+        ],
+    )
+    by_role = {s.role: s for s in segs}
+    assert by_role["tool_result"].tool_use_id == "toolu_abc"
+    # Non-tool_result segments never carry a tool_use_id.
+    assert by_role["assistant"].tool_use_id is None

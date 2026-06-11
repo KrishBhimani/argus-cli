@@ -1,10 +1,10 @@
 import * as echarts from 'echarts/core';
 import { LineChart, BarChart, HeatmapChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent } from 'echarts/components';
+import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent, DataZoomComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { tok } from './format';
 
-echarts.use([LineChart, BarChart, HeatmapChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent, CanvasRenderer]);
+echarts.use([LineChart, BarChart, HeatmapChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, VisualMapComponent, MarkLineComponent, DataZoomComponent, CanvasRenderer]);
 
 const THEME = {
   textStyle: { color: '#9ba6b3', fontFamily: '-apple-system, system-ui, sans-serif' },
@@ -178,23 +178,68 @@ export function calendarHeatmap(el: HTMLElement, days: { day: string; value: num
   return c;
 }
 
-export function trendsLine(el: HTMLElement, points: { bucket: string; groups: Record<string, { cost: number }> }[]) {
+export function turnTokensBar(
+  el: HTMLElement,
+  turns: { sequence: number; tokens: number; cacheRead: number; hasError: boolean }[],
+  onBarClick: (sequence: number) => void,
+) {
+  const c = makeChart(el);
+  c.setOption({
+    ...THEME,
+    // Animating hundreds of bars on load and on every zoom drag visibly
+    // janks large sessions.
+    animation: turns.length <= 200,
+    tooltip: {
+      ...THEME.tooltip,
+      trigger: 'item',
+      formatter: (p: any) => {
+        const t = turns[p.dataIndex];
+        return `Turn #${t.sequence}<br>${tok(t.tokens)} fresh + output<br><span style="color:#6b7585;">${tok(t.cacheRead)} cache read (context)</span>${t.hasError ? '<br><span style="color:#f85149;">contains a failed tool call</span>' : ''}`;
+      },
+    },
+    grid: { left: 50, right: 18, top: 12, bottom: 52 },
+    xAxis: { type: 'category', data: turns.map(t => '#' + t.sequence), ...AXIS },
+    yAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: (v: number) => tok(v) }, splitLine: AXIS.splitLine, axisLine: { show: false } },
+    dataZoom: [
+      { type: 'inside' },
+      {
+        type: 'slider', height: 16, bottom: 8,
+        borderColor: '#262d3a', backgroundColor: '#11151c',
+        fillerColor: 'rgba(88,166,255,0.15)',
+        handleStyle: { color: '#58a6ff' },
+        textStyle: { color: '#6b7585', fontSize: 9 },
+      },
+    ],
+    series: [{
+      type: 'bar',
+      barMaxWidth: 26,
+      data: turns.map(t => ({
+        value: t.tokens,
+        itemStyle: { color: t.hasError ? '#f85149' : '#58a6ff', borderRadius: [3, 3, 0, 0] },
+      })),
+    }],
+  });
+  c.on('click', (p: any) => onBarClick(turns[p.dataIndex].sequence));
+  return c;
+}
+
+export function trendsLine(el: HTMLElement, points: { bucket: string; groups: Record<string, { tokens: number }> }[]) {
   const c = makeChart(el);
   const allKeys = [...new Set(points.flatMap(p => Object.keys(p.groups)))];
   const palette = ['#f0883e', '#58a6ff', '#7ee787', '#d29922', '#bc8cff', '#f85149'];
   c.setOption({
     ...THEME,
-    tooltip: { ...THEME.tooltip, trigger: 'axis', valueFormatter: (v: number) => '$' + v.toFixed(2) },
+    tooltip: { ...THEME.tooltip, trigger: 'axis', valueFormatter: (v: number) => tok(v) + ' tokens' },
     legend: { data: allKeys, textStyle: { color: '#9ba6b3', fontSize: 11 }, top: 0 },
-    grid: { left: 50, right: 18, top: 38, bottom: 30 },
+    grid: { left: 56, right: 18, top: 38, bottom: 30 },
     xAxis: { type: 'category', data: points.map(p => p.bucket), ...AXIS },
-    yAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: '${value}' }, splitLine: AXIS.splitLine, axisLine: { show: false } },
+    yAxis: { type: 'value', axisLabel: { ...AXIS.axisLabel, formatter: (v: number) => tok(v) }, splitLine: AXIS.splitLine, axisLine: { show: false } },
     series: allKeys.map((k, i) => ({
       type: 'line', name: k,
       smooth: true, symbol: 'circle', symbolSize: 5,
       lineStyle: { color: palette[i % palette.length], width: 2 },
       itemStyle: { color: palette[i % palette.length] },
-      data: points.map(p => +(p.groups[k]?.cost ?? 0).toFixed(4)),
+      data: points.map(p => p.groups[k]?.tokens ?? 0),
     })),
   });
   return c;

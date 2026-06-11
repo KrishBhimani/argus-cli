@@ -89,18 +89,32 @@ def test_open_db_creates_alerts_table(db_path):
         conn.close()
 
 
-def test_open_db_applies_migration_005(db_path):
+def test_open_db_applies_latest_migration(db_path):
     from argus.store.db import SCHEMA_VERSION
 
     conn = open_db(db_path)
     try:
-        assert SCHEMA_VERSION == 5
         row = conn.execute(
             "SELECT value FROM app_meta WHERE key='schema_version'"
         ).fetchone()
-        assert row["value"] == "5"
+        assert row["value"] == str(SCHEMA_VERSION)
     finally:
         conn.close()
+
+
+def test_migration_006_adds_tool_use_id_column(db):
+    cols = {r["name"] for r in db.execute("PRAGMA table_info(transcript_segments)")}
+    assert "tool_use_id" in cols
+    row = db.execute("SELECT value FROM app_meta WHERE key = 'schema_version'").fetchone()
+    assert int(row["value"]) == 6
+
+
+def test_migration_006_index_exists(db):
+    names = {
+        r["name"]
+        for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+    }
+    assert "idx_segments_tool_use" in names
 
 
 def test_alerts_has_resolved_at_column(db_path):

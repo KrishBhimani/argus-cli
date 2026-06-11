@@ -136,6 +136,7 @@ class TranscriptSegment(BaseModel):
     timestamp: str
     role: SegmentRole
     text: str
+    tool_use_id: str | None = None
 
 
 AlertSeverity = Literal["info", "warning", "critical"]

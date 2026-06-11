@@ -204,6 +204,71 @@ class Repository:
         ).fetchall()
         return [_row_to_turn(r) for r in rows]
 
+    def session_timeline(self, session_id: str) -> list[dict[str, Any]]:
+        """Turns with their tool calls nested; error text attached to failed
+        calls when search indexing is on and a linked tool_result segment
+        exists. Powers GET /api/sessions/{id}/timeline."""
+        turns = self.get_turns_for_session(session_id)
+        call_rows = self.db.execute(
+            """
+            SELECT id, turn_index, tool_name, is_error, input_size, subagent_type
+            FROM tool_calls WHERE session_id = ?
+            ORDER BY turn_index, timestamp, id
+            """,
+            (session_id,),
+        ).fetchall()
+
+        # tool_calls.id is f"{session_id}:{tool_use_id}" (pipeline._to_tool_call).
+        prefix = f"{session_id}:"
+
+        error_text: dict[str, str] = {}
+        if self.is_search_indexing_enabled():
+            failed_ids = [
+                r["id"][len(prefix):]
+                for r in call_rows
+                if r["is_error"] and r["id"].startswith(prefix)
+            ]
+            if failed_ids:
+                ph = ",".join("?" for _ in failed_ids)
+                seg_rows = self.db.execute(
+                    f"""
+                    SELECT tool_use_id, text FROM transcript_segments
+                    WHERE session_id = ? AND role = 'tool_result'
+                      AND tool_use_id IN ({ph})
+                    """,
+                    [session_id, *failed_ids],
+                ).fetchall()
+                error_text = {r["tool_use_id"]: r["text"] for r in seg_rows}
+
+        calls_by_turn: dict[int, list[dict[str, Any]]] = {}
+        for r in call_rows:
+            tu_id = r["id"][len(prefix):] if r["id"].startswith(prefix) else r["id"]
+            calls_by_turn.setdefault(r["turn_index"], []).append(
+                {
+                    "tool_name": r["tool_name"],
+                    "tool_use_id": tu_id,
+                    "is_error": r["is_error"],
+                    "input_size": r["input_size"],
+                    "subagent_type": r["subagent_type"],
+                    "error_text": error_text.get(tu_id) if r["is_error"] else None,
+                }
+            )
+
+        return [
+            {
+                "sequence": t.sequence,
+                "timestamp": t.timestamp,
+                "model": t.model,
+                "fresh_input_tokens": t.fresh_input_tokens,
+                "cache_read_tokens": t.cache_read_tokens,
+                "cache_write_tokens": t.cache_write_tokens,
+                "output_tokens": t.output_tokens,
+                "cost_usd": t.cost_usd,
+                "tool_calls": calls_by_turn.get(t.sequence, []),
+            }
+            for t in turns
+        ]
+
     # ─── File offsets / parse errors ───────────────────────────────────
 
     def set_file_offset(self, path: str, offset: int) -> None:
@@ -528,17 +593,19 @@ class Repository:
                 "timestamp": r.timestamp,
                 "role": r.role,
                 "text": r.text,
+                "tool_use_id": r.tool_use_id,
             }
             for r in rows
         ]
         with self.db:
             self.db.executemany(
                 """
-                INSERT INTO transcript_segments (uid, session_id, timestamp, role, text)
-                VALUES (:uid, :session_id, :timestamp, :role, :text)
+                INSERT INTO transcript_segments (uid, session_id, timestamp, role, text, tool_use_id)
+                VALUES (:uid, :session_id, :timestamp, :role, :text, :tool_use_id)
                 ON CONFLICT(uid) DO UPDATE SET
                   session_id=excluded.session_id, timestamp=excluded.timestamp,
-                  role=excluded.role, text=excluded.text
+                  role=excluded.role, text=excluded.text,
+                  tool_use_id=excluded.tool_use_id
                 """,
                 params,
             )
@@ -549,6 +616,66 @@ class Repository:
             (session_id,),
         ).fetchone()
         return row["n"] if row else 0
+
+    def sessions_with_unpriced_turns(
+        self, priced_models: list[str], limit: int
+    ) -> list[dict[str, Any]]:
+        """Sessions with zero-cost turns whose model the CURRENT pricing
+        table prices — i.e. turns ingested before the model was in the
+        bundled table. Restricting to now-priced models keeps still-unknown
+        models from re-ingesting on every startup. Sub-agent ids collapse
+        to their parent so the backfill re-ingests the parent file tree."""
+        if not priced_models:
+            return []
+        ph = ",".join("?" for _ in priced_models)
+        rows = self.db.execute(
+            f"""
+            SELECT DISTINCT
+              CASE WHEN instr(t.session_id, '/') > 0
+                   THEN substr(t.session_id, 1, instr(t.session_id, '/') - 1)
+                   ELSE t.session_id END AS id
+            FROM turns t
+            WHERE t.cost_usd = 0
+              AND t.model IN ({ph})
+              AND (t.fresh_input_tokens + t.output_tokens
+                   + t.cache_read_tokens + t.cache_write_tokens) > 0
+            ORDER BY id
+            LIMIT ?
+            """,
+            [*priced_models, limit],
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
+
+    def tool_output_for(self, session_id: str, tool_use_id: str) -> str | None:
+        """Indexed tool_result text for one call, or None if not indexed."""
+        row = self.db.execute(
+            """
+            SELECT text FROM transcript_segments
+            WHERE session_id = ? AND tool_use_id = ? AND role = 'tool_result'
+            LIMIT 1
+            """,
+            (session_id, tool_use_id),
+        ).fetchone()
+        return row["text"] if row else None
+
+    def sessions_missing_tool_use_ids(self, limit: int) -> list[dict[str, Any]]:
+        """Sessions whose indexed tool_result segments predate the
+        tool_use_id column (NULL linkage). Sub-agent session ids collapse to
+        their parent so the backfill can re-ingest the parent file tree."""
+        rows = self.db.execute(
+            """
+            SELECT DISTINCT
+              CASE WHEN instr(ts.session_id, '/') > 0
+                   THEN substr(ts.session_id, 1, instr(ts.session_id, '/') - 1)
+                   ELSE ts.session_id END AS id
+            FROM transcript_segments ts
+            WHERE ts.role = 'tool_result' AND ts.tool_use_id IS NULL
+            ORDER BY id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
 
     def sessions_missing_segments(self, limit: int) -> list[dict[str, Any]]:
         rows = self.db.execute(

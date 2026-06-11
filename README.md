@@ -27,7 +27,7 @@ ingest finishes (~5–10s for a typical install).
 | Page | What it answers |
 |---|---|
 | **Overview** | How many tokens have I burned? How much would I have paid on the API? Where does my spend land each day? Plus a **"What needs attention"** card that surfaces detector findings (e.g. a tool whose error rate spiked this week). |
-| **Sessions** | Sortable table of every session — project, model, tokens, cost, duration. Click any row to drill in. |
+| **Sessions** | Sortable table of every session — project, model, tokens, cost, duration. Click any row to drill in: an **Overview** tab with totals and the turns table, and a **Timeline** tab showing per-turn token burn (chart + trace feed), every tool call, and failures — with the actual error output inline when search indexing is on. |
 | **Tools** | Tool-call leaderboard (Bash vs Edit vs Read vs WebFetch…), error rates per tool, MCP server breakdown, sub-agent invocations. |
 | **Search** *(opt-in)* | Full-text search over every prompt you've typed AND every assistant response, your replies, and tool output. SQLite FTS5, sub-millisecond, no embeddings. |
 | **Trends** | Tokens and cost bucketed by day / week / month, grouped by model. |

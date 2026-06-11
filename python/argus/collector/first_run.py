@@ -151,9 +151,21 @@ def _backfill_missing_derived_data(
     """Re-ingest sessions missing tool_calls / segments after a slice upgrade."""
     missing_tools = repo.sessions_missing_tool_calls(200)
     ids: set[str] = {c["id"] for c in missing_tools}
+    # Sessions whose segments predate the tool_use_id column also need their
+    # sub-agent files re-read, not just the parent — track them separately.
+    deep_reset: set[str] = set()
     if repo.is_search_indexing_enabled():
         for c in repo.sessions_missing_segments(200):
             ids.add(c["id"])
+        for c in repo.sessions_missing_tool_use_ids(200):
+            ids.add(c["id"])
+            deep_reset.add(c["id"])
+    # Zero-cost turns whose model the current table prices: ingested before
+    # the model was in the bundled table. Sub-agent turns need their files
+    # re-read too, hence deep_reset.
+    for c in repo.sessions_with_unpriced_turns(list(table.models.keys()), 200):
+        ids.add(c["id"])
+        deep_reset.add(c["id"])
     candidates = sorted(ids)[:200]
     if not candidates:
         return
@@ -176,6 +188,9 @@ def _backfill_missing_derived_data(
             continue
         adapter, file = match
         repo.set_file_offset(str(file), 0)
+        if id_ in deep_reset:
+            for sub in adapter.sub_session_files_for(file):
+                repo.set_file_offset(str(sub), 0)
         try:
             ingest_file(adapter, file, repo, table)
         except Exception as e:  # noqa: BLE001
