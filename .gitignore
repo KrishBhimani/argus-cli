@@ -11,6 +11,9 @@ coverage/
 # Personal planning notes — kept local, not published
 docs/
 
+# Brainstorming visual-companion mockups
+.superpowers/
+
 # Python build / virtualenv / cache artifacts
 __pycache__/
 *.py[cod]

@@ -14,9 +14,10 @@ from .migrations.inline import (
     MIGRATION_003,
     MIGRATION_004,
     MIGRATION_005,
+    MIGRATION_006,
 )
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class FTS5NotAvailableError(RuntimeError):
@@ -117,6 +118,9 @@ def open_db(path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
     if current < 5:
         conn.executescript(MIGRATION_005)
         current = 5
+    if current < 6:
+        conn.executescript(MIGRATION_006)
+        current = 6
 
     conn.execute(
         "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('schema_version', ?)",

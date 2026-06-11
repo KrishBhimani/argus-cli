@@ -178,3 +178,8 @@ CREATE INDEX IF NOT EXISTS idx_alerts_recent ON alerts(last_seen_at DESC);
 MIGRATION_005 = """
 ALTER TABLE alerts ADD COLUMN resolved_at TEXT;
 """
+
+MIGRATION_006 = """
+ALTER TABLE transcript_segments ADD COLUMN tool_use_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_segments_tool_use ON transcript_segments(session_id, tool_use_id);
+"""
