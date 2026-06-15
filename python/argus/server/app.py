@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -84,7 +85,27 @@ def build_app(repo: Repository, opts: ServerOpts) -> FastAPI:
 
 
 def serve_blocking(app: FastAPI, *, host: str, port: int) -> None:
-    """Run uvicorn in the current thread until SIGINT or .should_exit."""
+    """Run uvicorn in the current thread until SIGINT/SIGTERM or .should_exit.
+
+    We install our own signal handlers *before* calling ``server.run()`` so that
+    Ctrl+C produces a clean shutdown instead of the spurious
+    ``KeyboardInterrupt`` + ``CancelledError`` traceback uvicorn otherwise dumps.
+
+    Two layers conspire to print that traceback, and our handler defuses both:
+
+      1. ``asyncio.run()`` installs its own SIGINT handler that cancels the main
+         task and raises ``KeyboardInterrupt`` mid-loop -- but only when the
+         current handler is ``signal.default_int_handler`` (see CPython
+         ``asyncio/runners.py``). Installing ours first means asyncio leaves
+         SIGINT alone.
+      2. uvicorn's ``capture_signals()`` re-raises the captured signal after a
+         graceful shutdown. With ours as the restored handler, that re-raise
+         lands on a no-op instead of becoming a ``KeyboardInterrupt``.
+
+    During ``server.run()`` uvicorn's own ``handle_exit`` is the active handler
+    (it sets ``should_exit`` / ``force_exit`` on first/second signal); ours is
+    the benign backstop on either side of that window.
+    """
     config = uvicorn.Config(
         app,
         host=host,
@@ -93,7 +114,25 @@ def serve_blocking(app: FastAPI, *, host: str, port: int) -> None:
         access_log=False,
     )
     server = uvicorn.Server(config)
+
+    def _request_exit(_signum: int, _frame: Any) -> None:
+        if server.should_exit:
+            server.force_exit = True
+        server.should_exit = True
+
+    previous: dict[int, Any] = {}
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            previous[sig] = signal.signal(sig, _request_exit)
+        except (ValueError, OSError):
+            # Not the main thread, or signal unsupported on this platform.
+            pass
+
     try:
         server.run()
-    except KeyboardInterrupt:
-        pass
+    finally:
+        for sig, handler in previous.items():
+            try:
+                signal.signal(sig, handler)
+            except (ValueError, OSError):
+                pass

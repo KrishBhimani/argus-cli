@@ -117,6 +117,42 @@ def test_migration_006_index_exists(db):
     assert "idx_segments_tool_use" in names
 
 
+def test_open_db_recovers_from_half_applied_migration(db_path):
+    """A DB whose column was added but whose schema_version never advanced
+    must re-open cleanly, not crash with 'duplicate column name'.
+
+    Reproduces the field failure: MIGRATION_006 added transcript_segments.
+    tool_use_id but schema_version stayed < 6 (migrations were committed
+    per-statement while the version was written only at the very end). The
+    re-run then hit a non-idempotent ALTER TABLE ADD COLUMN.
+    """
+    # Build a faithfully half-migrated DB: column present, index missing,
+    # schema_version pinned back to 5.
+    conn = open_db(db_path)
+    conn.execute("DROP INDEX IF EXISTS idx_segments_tool_use")
+    conn.execute(
+        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('schema_version', '5')"
+    )
+    conn.close()
+
+    # Re-open must not raise, must finish at v6, and must heal the missing index.
+    conn = open_db(db_path)
+    try:
+        ver = conn.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()
+        assert int(ver["value"]) == 6
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(transcript_segments)")}
+        assert "tool_use_id" in cols
+        idx = {
+            r["name"]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+        }
+        assert "idx_segments_tool_use" in idx
+    finally:
+        conn.close()
+
+
 def test_alerts_has_resolved_at_column(db_path):
     conn = open_db(db_path)
     try:
