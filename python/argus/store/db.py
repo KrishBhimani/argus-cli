@@ -5,6 +5,7 @@ is better than a confusing OperationalError deep in searchPrompts later.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -38,6 +39,74 @@ def _assert_fts5(conn: sqlite3.Connection) -> None:
             "Argus requires FTS5 for prompt and transcript search. "
             "Use the official CPython distribution or build sqlite with FTS5."
         )
+
+
+_BLOCK_KW = re.compile(r"\b(BEGIN|CASE|END)\b", re.IGNORECASE)
+
+
+def _split_statements(script: str) -> list[str]:
+    """Split a migration script into individual SQL statements.
+
+    SQLite separates statements with ';', but a ``CREATE TRIGGER`` body holds
+    its own ';'-terminated statements between ``BEGIN`` and ``END``. We track
+    nesting so a trigger is emitted as a single statement rather than being
+    chopped mid-body. ``CASE`` is counted as an opener too: it also closes with
+    ``END``, so counting it keeps ENDs balanced whether a ``CASE`` appears at
+    top level (MIGRATION_002's UPDATE) or inside a future trigger body.
+    """
+    statements: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    for chunk in script.split(";"):
+        buf.append(chunk)
+        for kw in _BLOCK_KW.findall(chunk):
+            if kw.upper() in ("BEGIN", "CASE"):
+                depth += 1
+            elif depth > 0:
+                depth -= 1
+        if depth == 0:
+            stmt = ";".join(buf).strip()
+            buf = []
+            if stmt:
+                statements.append(stmt)
+    tail = ";".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def _run_migration(conn: sqlite3.Connection, version: int, sql: str) -> None:
+    """Apply one versioned migration and record schema_version atomically.
+
+    The migration's statements and the schema_version bump run inside a single
+    explicit transaction, so a crash mid-migration can never again leave the
+    DB with applied DDL but a stale recorded version (the bug that produced
+    ``duplicate column name`` on restart).
+
+    Recovery: SQLite has no ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``, so a
+    DB left half-migrated by the old non-atomic runner re-reports
+    ``duplicate column name``. Because the column is already present, we skip
+    just that statement and continue — every other migration statement is
+    ``IF NOT EXISTS`` / ``INSERT OR REPLACE`` / idempotent ``UPDATE``. This is
+    non-destructive: no row is dropped, deleted, or rewritten.
+    """
+    conn.execute("BEGIN")
+    try:
+        for stmt in _split_statements(sql):
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e).lower():
+                    continue  # column already added by a prior partial run
+                raise
+        conn.execute(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('schema_version', ?)",
+            (str(version),),
+        )
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def open_db(path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
@@ -106,25 +175,18 @@ def open_db(path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
     ).fetchone()
     current = int(row["value"]) if row else 1
 
-    if current < 2:
-        conn.executescript(MIGRATION_002)
-        current = 2
-    if current < 3:
-        conn.executescript(MIGRATION_003)
-        current = 3
-    if current < 4:
-        conn.executescript(MIGRATION_004)
-        current = 4
-    if current < 5:
-        conn.executescript(MIGRATION_005)
-        current = 5
-    if current < 6:
-        conn.executescript(MIGRATION_006)
-        current = 6
-
-    conn.execute(
-        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('schema_version', ?)",
-        (str(SCHEMA_VERSION),),
+    # Each migration commits its DDL and its schema_version bump together, so
+    # the recorded version always matches the applied schema. See _run_migration.
+    versioned = (
+        (2, MIGRATION_002),
+        (3, MIGRATION_003),
+        (4, MIGRATION_004),
+        (5, MIGRATION_005),
+        (6, MIGRATION_006),
     )
+    for version, sql in versioned:
+        if current < version:
+            _run_migration(conn, version, sql)
+            current = version
 
     return conn
