@@ -145,15 +145,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
         ]
         return {"sessions": sessions}
 
-    @api.get("/api/sessions/{session_id}")
-    def get_session(session_id: str) -> dict[str, Any]:
-        session = repo.get_session(session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="not found")
-        turns = [t.model_dump() for t in repo.get_turns_for_session(session_id)]
-        return {"session": session.model_dump(), "turns": turns}
-
-    @api.get("/api/sessions/{session_id}/timeline")
+    @api.get("/api/sessions/{session_id:path}/timeline")
     def session_timeline(session_id: str) -> dict[str, Any]:
         if repo.get_session(session_id) is None:
             raise HTTPException(status_code=404, detail="not found")
@@ -162,7 +154,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             "turns": repo.session_timeline(session_id),
         }
 
-    @api.get("/api/sessions/{session_id}/tool-output/{tool_use_id}")
+    @api.get("/api/sessions/{session_id:path}/tool-output/{tool_use_id}")
     def session_tool_output(session_id: str, tool_use_id: str) -> dict[str, Any]:
         if repo.get_session(session_id) is None:
             raise HTTPException(status_code=404, detail="not found")
@@ -544,7 +536,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             "results": results[:limit],
         }
 
-    @api.get("/api/sessions/{session_id}/transcript")
+    @api.get("/api/sessions/{session_id:path}/transcript")
     def session_transcript(session_id: str, q: str = "", limit: int = 100) -> dict[str, Any]:
         limit = min(limit, 500)
         q = q.strip()
@@ -577,6 +569,16 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
             for row in r["rows"]
         ]
         return {"total": r["total"], "segments": segments}
+
+    # Registered LAST among /api/sessions/* routes: the greedy {session_id:path}
+    # converter would otherwise shadow the suffixed routes (/timeline, etc.).
+    @api.get("/api/sessions/{session_id:path}")
+    def get_session(session_id: str) -> dict[str, Any]:
+        session = repo.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="not found")
+        turns = [t.model_dump() for t in repo.get_turns_for_session(session_id)]
+        return {"session": session.model_dump(), "turns": turns}
 
     @api.get("/api/search-index/status")
     def search_index_status() -> dict[str, Any]:

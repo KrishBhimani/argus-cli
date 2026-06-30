@@ -343,3 +343,24 @@ def test_session_tool_output_endpoint(api_client, repo):
     assert body == {"search_enabled": False, "found": False, "text": None}
 
     assert api_client.get("/api/sessions/ghost/tool-output/tu_ls").status_code == 404
+
+
+def test_session_routes_accept_slash_ids_and_ordering(repo):
+    parent = session_factory("claude_code:P", "2026-06-01T00:00:00Z")
+    sub = session_factory("claude_code:P/agent-a1", "2026-06-01T00:00:00Z")
+    repo.upsert_session(parent)
+    repo.upsert_session(sub)
+    client = TestClient(_make_app(repo))
+
+    # Bare get_session matches a slash id (was unmatchable before :path).
+    r = client.get("/api/sessions/claude_code:P/agent-a1")
+    assert r.status_code == 200
+    assert r.json()["session"]["id"] == "claude_code:P/agent-a1"
+
+    # The /timeline suffix on a slash id reaches the timeline handler, not the
+    # greedy bare {session_id:path} route. Timeline responses carry
+    # "search_enabled"; get_session responses carry "session".
+    r = client.get("/api/sessions/claude_code:P/agent-a1/timeline")
+    assert r.status_code == 200
+    body = r.json()
+    assert "search_enabled" in body and "session" not in body
