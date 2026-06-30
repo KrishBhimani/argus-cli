@@ -73,6 +73,21 @@ export interface ToolsOverview {
   subagents: { type: string; calls: number; errors: number }[];
 }
 
+export interface SubagentSummary {
+  id: string;
+  model: string;
+  status: 'ok' | 'error';
+  turns: number;
+  tool_calls: number;
+  errors: number;
+  tokens: { fresh_input: number; output: number; cache_read: number; cache_write: number };
+  total_tokens: number;
+  cost_usd: number;
+  duration_sec: number | null;
+  task_given: string | null;
+  tools: { name: string; count: number; errors: number }[];
+}
+
 export interface PromptHit {
   id: number;
   timestamp_ms: number;
@@ -105,6 +120,9 @@ export const api = {
   sessionToolOutput: (id: string, toolUseId: string) =>
     fetch(`/api/sessions/${encodeURIComponent(id)}/tool-output/${encodeURIComponent(toolUseId)}`)
       .then(r => r.ok ? r.json() as Promise<{ search_enabled: boolean; found: boolean; text: string | null }> : null),
+  subagents: (id: string) =>
+    fetch(`/api/sessions/${encodeURIComponent(id)}/subagents`)
+      .then(r => r.json() as Promise<{ subagents: SubagentSummary[] }>),
   overview: (window: string) => fetch('/api/overview?window=' + window).then(r => r.json() as Promise<Overview>),
   trends: (granularity: string, groupBy: string) => fetch(`/api/trends?granularity=${granularity}&groupBy=${groupBy}`).then(r => r.json() as Promise<{ points: { bucket: string; groups: Record<string, { cost: number; tokens: number; sessions: number }> }[] }>),
   pricing: () => fetch('/api/pricing').then(r => r.json() as Promise<{ version: string }>),
