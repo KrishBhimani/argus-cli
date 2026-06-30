@@ -516,12 +516,18 @@ import Default from '../layouts/Default.astro';
           subagentsPane.innerHTML = '<p class="empty">No sub-agents.</p>';
           return;
         }
-        const rows = subs.map((sa, i) => `
+        const rows = subs.map((sa, i) => {
+          const dotTitle = sa.status === 'error'
+            ? `${sa.errors} failed tool call${sa.errors === 1 ? '' : 's'}`
+            : 'no failed tool calls';
+          const dot = sa.status === 'error' ? `✗ ${num(sa.errors)}` : '✓';
+          return `
           <div class="sa-row${i === 0 ? ' sel' : ''}" data-i="${i}">
-            <span class="sa-dot ${sa.status}">${sa.status === 'error' ? '✗' : '✓'}</span>
+            <span class="sa-dot ${sa.status}" title="${dotTitle}">${dot}</span>
             <code class="mono">${escapeHtml(sa.model)}</code>
             <span class="sa-meta">${num(sa.tool_calls)} tools · ${tok(sa.total_tokens)}</span>
-          </div>`).join('');
+          </div>`;
+        }).join('');
         subagentsPane.innerHTML = `
           <div class="sa-wrap">
             <div class="sa-list">${rows}</div>
