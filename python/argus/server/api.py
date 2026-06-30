@@ -128,7 +128,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
                 status_code=409,
                 detail=(
                     "Argus is read-only because the argusd daemon is running. "
-                    "Manage indexing from the CLI (e.g. `argus search enable`) "
+                    "Manage indexing from the CLI (e.g. `argus indexing enable`) "
                     "or stop the daemon with `argus daemon stop`."
                 ),
             )

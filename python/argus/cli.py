@@ -24,9 +24,22 @@ from .store.repository import Repository
 logger = logging.getLogger("argus")
 app = typer.Typer(help="Local-first dashboard for coding-agent costs", no_args_is_help=True)
 pricing_app = typer.Typer(help="Pricing-table operations")
-search_app = typer.Typer(help="Manage transcript-search indexing")
+indexing_app = typer.Typer(help="Manage transcript indexing (powers full-text search and sub-agent Task-given)")
+
+
+@indexing_app.callback()
+def _indexing_group(ctx: typer.Context) -> None:
+    # `search` is the old name, kept as a hidden alias so existing scripts and
+    # muscle memory keep working. Nudge toward the new name when invoked that way.
+    if ctx.info_name == "search":
+        typer.echo("Note: `argus search` has been renamed to `argus indexing`; the old name still works.", err=True)
+
+
+# Back-compat alias: keep this binding so `search_*` command references resolve.
+search_app = indexing_app
 app.add_typer(pricing_app, name="pricing")
-app.add_typer(search_app, name="search")
+app.add_typer(indexing_app, name="indexing")
+app.add_typer(indexing_app, name="search", hidden=True)
 claude_app = typer.Typer(help="Scaffold and manage .claude/ project setups")
 template_app = typer.Typer(help="Manage scaffolding templates")
 claude_app.add_typer(template_app, name="template")
@@ -185,7 +198,7 @@ def search_status(data_dir: Path = typer.Option(_default_data_dir(), "--data-dir
     typer.echo(f"Indexed:  {segs['total']:,} segments across {segs['sessions']} sessions")
     if not enabled and segs["total"] > 0:
         typer.echo("Note:     existing segments stay on disk but are hidden from search")
-        typer.echo("          until you re-enable. Use 'argus search clear' to wipe them.")
+        typer.echo("          until you re-enable. Use 'argus indexing clear' to wipe them.")
 
 
 @search_app.command("enable")
@@ -211,7 +224,7 @@ def search_disable(data_dir: Path = typer.Option(_default_data_dir(), "--data-di
     typer.echo("Disabled.")
     if segs["total"] > 0:
         typer.echo(f"{segs['total']:,} existing segments are still on disk but hidden")
-        typer.echo("from search. Run `argus search clear` to wipe them.")
+        typer.echo("from search. Run `argus indexing clear` to wipe them.")
 
 
 @search_app.command("clear")
