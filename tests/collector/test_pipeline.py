@@ -7,6 +7,7 @@ from pathlib import Path
 from argus.adapters.claude_code.adapter import ClaudeCodeAdapter
 from argus.collector.pipeline import ingest_file
 from argus.pricing.load import load_pricing_table
+from argus.store.repository import normalize_project_path
 
 
 def _line(msg_id: str, *, sid="sess1", input_tokens=1_000_000, output_tokens=1_000_000) -> str:
@@ -191,8 +192,11 @@ def test_subagent_backfills_without_reingesting_parent(tmp_path: Path, repo):
     assert parent.total_output_tokens == 1_500_000
     assert parent.turn_count == 2
     assert len(parent.metadata.get("sub_agent_session_ids", [])) == 1
-    # Descriptive fields survived the no-new-parent-bytes recompute.
-    assert parent.project_path == "C:/proj"
+    # Descriptive fields survived the no-new-parent-bytes recompute. project_path
+    # goes through the same normalization as ingest (drive-letter lowercased on
+    # Windows so prompt<->session linkage joins byte-for-byte), so compare
+    # against that contract rather than the raw input.
+    assert parent.project_path == normalize_project_path("C:/proj")
 
 
 def test_steady_state_reingest_is_a_noop_for_unchanged_subagents(tmp_path: Path, repo, monkeypatch):
@@ -350,3 +354,58 @@ def test_skips_segment_writes_when_search_flag_off(tmp_path: Path, repo):
     repo.set_file_offset(str(session_file), 0)
     ingest_file(adapter, session_file, repo, table)
     assert repo.segment_stats()["total"] == 1
+
+
+def test_backfill_indexes_subagent_segments_after_enabling(tmp_path: Path, repo):
+    """REGRESSION: enabling search indexing AFTER a session was ingested must
+    backfill the SUB-AGENT transcript segments, not just the parent's. Sub-agent
+    files sit at EOF, so they're only re-read when their offsets are reset
+    (deep_reset). The missing-segments backfill must route a sub-agent to its
+    parent + deep_reset — otherwise the Sub-agents tab shows an empty
+    "Task given" forever."""
+    from argus.collector.first_run import _backfill_missing_derived_data
+
+    def asst(sid: str, mid: str) -> str:
+        return json.dumps({
+            "type": "assistant", "sessionId": sid, "uuid": "u" + mid,
+            "timestamp": "2026-05-01T00:00:00Z", "cwd": "C:/proj", "version": "2.1.94",
+            "message": {"id": mid, "model": "claude-opus-4-7", "role": "assistant",
+                        "content": [{"type": "text", "text": "working on it"}],
+                        "usage": {"input_tokens": 10, "output_tokens": 10,
+                                  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}})
+
+    def user(sid: str, uid: str, text: str) -> str:
+        return json.dumps({
+            "type": "user", "sessionId": sid, "uuid": uid,
+            "timestamp": "2026-05-01T00:00:00Z", "cwd": "C:/proj", "version": "2.1.94",
+            "message": {"role": "user", "content": text}})
+
+    claude_root = tmp_path / ".claude"
+    proj = claude_root / "projects" / "C--proj"
+    proj.mkdir(parents=True)
+    parent_file = proj / "parent.jsonl"
+    parent_file.write_text(asst("parent", "p1") + "\n", encoding="utf-8")
+    sub_dir = proj / "parent" / "subagents"
+    sub_dir.mkdir(parents=True)
+    (sub_dir / "agent-aabc.jsonl").write_text(
+        user("parent", "su1", "Research consensus mechanisms") + "\n"
+        + asst("parent", "s1") + "\n",
+        encoding="utf-8")
+
+    adapter = ClaudeCodeAdapter(claude_root)
+    table = load_pricing_table()
+
+    # Indexing OFF during ingest -> sub-agent exists but no segments.
+    assert repo.is_search_indexing_enabled() is False
+    ingest_file(adapter, parent_file, repo, table)
+    sub_id = "claude_code:parent/agent-aabc"
+    assert repo.get_session(sub_id) is not None
+    assert repo.count_segments_for_session(sub_id) == 0
+
+    # Enable indexing, then run the backfill (what `argus start` does).
+    repo.set_search_indexing_enabled(True)
+    _backfill_missing_derived_data([adapter], repo, table)
+
+    # The sub-agent transcript must now be indexed -> Task given is recoverable.
+    assert repo.count_segments_for_session(sub_id) > 0
+    assert repo._first_user_text(sub_id) == "Research consensus mechanisms"

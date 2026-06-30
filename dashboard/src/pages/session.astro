@@ -119,7 +119,16 @@ import Default from '../layouts/Default.astro';
     }
     #to-top:hover { color: var(--text-0); border-color: var(--accent, #f0883e); }
     .sa-wrap { display: grid; grid-template-columns: 38% 62%; gap: 1rem; align-items: start; }
-    .sa-list { display: flex; flex-direction: column; gap: 2px; }
+    .sa-list {
+      display: flex; flex-direction: column; gap: 2px;
+      max-height: calc(100vh - 13rem); overflow-y: auto;
+      padding-right: 0.35rem; scrollbar-gutter: stable;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .sa-list::-webkit-scrollbar { width: 8px; }
+    .sa-list::-webkit-scrollbar-track { background: transparent; }
+    .sa-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .sa-list::-webkit-scrollbar-thumb:hover { background: var(--text-2); }
     .sa-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.55rem; border-radius: 7px; cursor: pointer; font-size: 0.84rem; }
     .sa-row:hover { background: var(--bg-2); }
     .sa-row.sel { background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--border); }
@@ -127,7 +136,7 @@ import Default from '../layouts/Default.astro';
     .sa-dot.ok { color: var(--good); }
     .sa-dot.error { color: #f85149; }
     .sa-meta { margin-left: auto; color: var(--text-2); font-size: 0.76rem; white-space: nowrap; }
-    .sa-detail { padding: 1rem; }
+    .sa-detail { padding: 1rem; position: sticky; top: 1rem; align-self: start; }
     .sa-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 0.8rem; }
     .sa-stats > div { background: var(--bg-2); border-radius: 8px; padding: 0.5rem 0.6rem; }
     .sa-stats span { display: block; color: var(--text-2); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; }

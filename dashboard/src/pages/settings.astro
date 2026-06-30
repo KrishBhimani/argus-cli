@@ -219,7 +219,7 @@ import Default from '../layouts/Default.astro';
         daemon = (await fetch('/api/ingest/status').then(r => r.json())).daemon === true;
       } catch { /* leave daemon=false */ }
       if (daemon) {
-        actions.innerHTML = `<span style="color:var(--text-2);font-size:0.82rem;">Read-only while <code>argusd</code> is running — manage indexing from the CLI (<code>argus search enable</code>) or stop the daemon with <code>argus daemon stop</code>.</span>`;
+        actions.innerHTML = `<span style="color:var(--text-2);font-size:0.82rem;">Read-only while <code>argusd</code> is running — manage indexing from the CLI (<code>argus indexing enable</code>) or stop the daemon with <code>argus daemon stop</code>.</span>`;
         return;
       }
 
