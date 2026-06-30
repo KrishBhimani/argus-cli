@@ -170,3 +170,43 @@ def test_serve_blocking_ctrl_c_shuts_down_without_traceback(monkeypatch):
     assert seen["should_exit"] is True
     assert seen["force_exit"] is True
     assert after is before  # handlers restored on exit
+
+
+def test_safe_staticfiles_swallows_oserror(monkeypatch, tmp_path):
+    from starlette.staticfiles import StaticFiles
+
+    from argus.server.app import SafeStaticFiles
+
+    sf = SafeStaticFiles(directory=str(tmp_path))
+
+    def boom(self, path):
+        raise OSError(
+            123, "The filename, directory name, or volume label syntax is incorrect"
+        )
+
+    monkeypatch.setattr(StaticFiles, "lookup_path", boom)
+    # Must NOT raise; returns the "not found" sentinel.
+    assert sf.lookup_path("api/sessions/claude_code:x/agent-y") == ("", None)
+
+
+def test_subagent_url_does_not_500(repo, tmp_path: Path):
+    dist = tmp_path / "dashboard-dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html/>", encoding="utf-8")
+    app = build_app(
+        repo,
+        ServerOpts(
+            pricing_table_version="v1",
+            ingest_status=lambda: IngestStatus(
+                foreground_complete=True, pending=0, processed=0, total=0
+            ),
+            dashboard_dir=dist,
+            port=0,
+            adapters=[],
+            pricing_table=PricingTable(version="v1", models={}),
+        ),
+    )
+    client = TestClient(app)
+    # Unknown sub-agent id: must be a clean 404, never a 500/ASGI crash.
+    r = client.get("/api/sessions/claude_code:missing/agent-zzz")
+    assert r.status_code == 404

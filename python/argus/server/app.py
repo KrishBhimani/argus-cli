@@ -35,6 +35,22 @@ class ServerOpts:
     daemon: bool = False
 
 
+class SafeStaticFiles(StaticFiles):
+    """StaticFiles that 404s (never 500s) on an unservable path.
+
+    On Windows, ``os.stat`` of a path whose segment contains ``:`` (e.g. a
+    sub-agent id like ``claude_code:<uuid>/agent-<hex>`` that fell through to
+    the SPA mount) raises ``OSError [WinError 123]``. Swallow any OSError and
+    report "not found" so a malformed URL can never crash a request.
+    """
+
+    def lookup_path(self, path: str) -> tuple[str, Any]:
+        try:
+            return super().lookup_path(path)
+        except OSError:
+            return "", None
+
+
 def build_app(repo: Repository, opts: ServerOpts) -> FastAPI:
     """Build the FastAPI app with CSRF middleware, API routes, static mount."""
     app = FastAPI(title="Argus", docs_url=None, redoc_url=None, openapi_url=None)
@@ -77,7 +93,7 @@ def build_app(repo: Repository, opts: ServerOpts) -> FastAPI:
     if opts.dashboard_dir.exists():
         app.mount(
             "/",
-            StaticFiles(directory=str(opts.dashboard_dir), html=True),
+            SafeStaticFiles(directory=str(opts.dashboard_dir), html=True),
             name="dashboard",
         )
 
