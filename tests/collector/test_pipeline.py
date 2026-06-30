@@ -7,6 +7,7 @@ from pathlib import Path
 from argus.adapters.claude_code.adapter import ClaudeCodeAdapter
 from argus.collector.pipeline import ingest_file
 from argus.pricing.load import load_pricing_table
+from argus.store.repository import normalize_project_path
 
 
 def _line(msg_id: str, *, sid="sess1", input_tokens=1_000_000, output_tokens=1_000_000) -> str:
@@ -191,8 +192,11 @@ def test_subagent_backfills_without_reingesting_parent(tmp_path: Path, repo):
     assert parent.total_output_tokens == 1_500_000
     assert parent.turn_count == 2
     assert len(parent.metadata.get("sub_agent_session_ids", [])) == 1
-    # Descriptive fields survived the no-new-parent-bytes recompute.
-    assert parent.project_path == "C:/proj"
+    # Descriptive fields survived the no-new-parent-bytes recompute. project_path
+    # goes through the same normalization as ingest (drive-letter lowercased on
+    # Windows so prompt<->session linkage joins byte-for-byte), so compare
+    # against that contract rather than the raw input.
+    assert parent.project_path == normalize_project_path("C:/proj")
 
 
 def test_steady_state_reingest_is_a_noop_for_unchanged_subagents(tmp_path: Path, repo, monkeypatch):
