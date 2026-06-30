@@ -762,3 +762,51 @@ def test_sessions_with_unpriced_turns_ignores_tokenless_turns(repo):
     repo.upsert_turn(turn_factory("a:m0", "claude_code:a", "2026-05-01T00:00:00Z",
                                   cost=0.0, fresh=0, output=0, model="claude-fable-5"))
     assert repo.sessions_with_unpriced_turns(["claude-fable-5"], 100) == []
+
+
+def test_subagent_summaries(repo):
+    parent = session_factory("claude_code:P", "2026-06-01T00:00:00Z")
+    parent.metadata["sub_agent_session_ids"] = [
+        "claude_code:P/agent-a1",
+        "claude_code:P/agent-a2",
+        "claude_code:P/agent-gone",  # no row -> skipped
+    ]
+    repo.upsert_session(parent)
+    repo.upsert_session(session_factory("claude_code:P/agent-a1", "2026-06-01T00:00:00Z"))
+    repo.upsert_session(session_factory("claude_code:P/agent-a2", "2026-06-01T00:00:00Z"))
+
+    repo.upsert_tool_calls([
+        ToolCall(id="claude_code:P/agent-a1:t1", session_id="claude_code:P/agent-a1",
+                 turn_index=0, tool_name="Read", is_error=0, input_size=10,
+                 subagent_type=None, timestamp="2026-06-01T00:00:00Z"),
+        ToolCall(id="claude_code:P/agent-a1:t2", session_id="claude_code:P/agent-a1",
+                 turn_index=0, tool_name="Bash", is_error=1, input_size=10,
+                 subagent_type=None, timestamp="2026-06-01T00:00:01Z"),
+    ])
+    repo.upsert_transcript_segments([
+        TranscriptSegment(uid="claude_code:P/agent-a1:s0",
+                          session_id="claude_code:P/agent-a1",
+                          timestamp="2026-06-01T00:00:00Z", role="user",
+                          text="Review the db diff"),
+    ])
+
+    summaries = repo.subagent_summaries("claude_code:P")
+    assert [s["id"] for s in summaries] == [
+        "claude_code:P/agent-a1", "claude_code:P/agent-a2"]
+
+    s1 = summaries[0]
+    assert s1["status"] == "error"
+    assert s1["errors"] == 1
+    assert s1["tool_calls"] == 2
+    assert s1["task_given"] == "Review the db diff"
+    assert {t["name"]: (t["count"], t["errors"]) for t in s1["tools"]} == {
+        "Read": (1, 0), "Bash": (1, 1)}
+
+    s2 = summaries[1]
+    assert s2["status"] == "ok"
+    assert s2["tools"] == []
+    assert s2["task_given"] is None
+
+
+def test_subagent_summaries_missing_parent(repo):
+    assert repo.subagent_summaries("claude_code:nope") == []

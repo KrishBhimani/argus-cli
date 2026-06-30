@@ -461,6 +461,74 @@ class Repository:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def subagent_summaries(self, parent_id: str) -> list[dict[str, Any]]:
+        """Flat per-sub-agent summary for the Sub-agents tab. One dict per
+        existing direct child listed in the parent's
+        metadata.sub_agent_session_ids. Missing child rows are skipped."""
+        parent = self.get_session(parent_id)
+        if parent is None:
+            return []
+        ids = parent.metadata.get("sub_agent_session_ids", []) or []
+        out: list[dict[str, Any]] = []
+        for sid in ids:
+            s = self.get_session(sid)
+            if s is None:
+                continue
+            tools = self._tool_summary(sid)
+            errors = sum(t["errors"] for t in tools)
+            out.append(
+                {
+                    "id": s.id,
+                    "model": s.primary_model,
+                    "status": "error" if errors else "ok",
+                    "turns": s.turn_count,
+                    "tool_calls": sum(t["count"] for t in tools),
+                    "errors": errors,
+                    "tokens": {
+                        "fresh_input": s.total_fresh_input_tokens,
+                        "output": s.total_output_tokens,
+                        "cache_read": s.total_cache_read_tokens,
+                        "cache_write": s.total_cache_write_tokens,
+                    },
+                    "total_tokens": (
+                        s.total_fresh_input_tokens + s.total_output_tokens
+                        + s.total_cache_read_tokens + s.total_cache_write_tokens
+                    ),
+                    "cost_usd": s.total_cost_usd,
+                    "duration_sec": s.duration_sec,
+                    "task_given": self._first_user_text(sid),
+                    "tools": tools,
+                }
+            )
+        return out
+
+    def _tool_summary(self, session_id: str) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            """
+            SELECT tool_name AS name, COUNT(*) AS count,
+                   COALESCE(SUM(is_error), 0) AS errors
+            FROM tool_calls WHERE session_id = ?
+            GROUP BY tool_name
+            ORDER BY count DESC, tool_name
+            """,
+            (session_id,),
+        ).fetchall()
+        return [
+            {"name": r["name"], "count": r["count"], "errors": r["errors"]}
+            for r in rows
+        ]
+
+    def _first_user_text(self, session_id: str) -> str | None:
+        row = self.db.execute(
+            """
+            SELECT text FROM transcript_segments
+            WHERE session_id = ? AND role = 'user'
+            ORDER BY rowid LIMIT 1
+            """,
+            (session_id,),
+        ).fetchone()
+        return row["text"] if row else None
+
     def sessions_missing_tool_calls(self, limit: int) -> list[dict[str, Any]]:
         rows = self.db.execute(
             """

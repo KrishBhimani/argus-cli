@@ -6,6 +6,7 @@ import Default from '../layouts/Default.astro';
   <div class="sd-tabs">
     <button id="tab-btn-overview" class="sd-tab active" type="button">Overview</button>
     <button id="tab-btn-timeline" class="sd-tab" type="button">Timeline</button>
+    <button id="tab-btn-subagents" class="sd-tab" type="button" style="display:none;">Sub-agents</button>
   </div>
   <div id="content">
     <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
@@ -13,6 +14,7 @@ import Default from '../layouts/Default.astro';
   <div id="timeline-content" style="display:none;">
     <div class="card"><div class="skel" style="width:60%;height:1.5em;"></div></div>
   </div>
+  <div id="subagents-content" style="display:none;"></div>
   <button id="to-top" type="button" title="Back to top">↑</button>
 
   <!--
@@ -116,10 +118,28 @@ import Default from '../layouts/Default.astro';
       display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
     }
     #to-top:hover { color: var(--text-0); border-color: var(--accent, #f0883e); }
+    .sa-wrap { display: grid; grid-template-columns: 38% 62%; gap: 1rem; align-items: start; }
+    .sa-list { display: flex; flex-direction: column; gap: 2px; }
+    .sa-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.55rem; border-radius: 7px; cursor: pointer; font-size: 0.84rem; }
+    .sa-row:hover { background: var(--bg-2); }
+    .sa-row.sel { background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--border); }
+    .sa-dot { font-weight: 700; }
+    .sa-dot.ok { color: var(--good); }
+    .sa-dot.error { color: #f85149; }
+    .sa-meta { margin-left: auto; color: var(--text-2); font-size: 0.76rem; white-space: nowrap; }
+    .sa-detail { padding: 1rem; }
+    .sa-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 0.8rem; }
+    .sa-stats > div { background: var(--bg-2); border-radius: 8px; padding: 0.5rem 0.6rem; }
+    .sa-stats span { display: block; color: var(--text-2); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .sa-stats b { font-size: 1rem; }
+    .sa-task { background: var(--bg-2); border-radius: 7px; padding: 0.6rem 0.7rem; font-size: 0.85rem; margin-bottom: 0.4rem; line-height: 1.4; word-break: break-word; }
+    .sa-tool { display: flex; justify-content: space-between; font-size: 0.82rem; padding: 0.25rem 0.4rem; border-radius: 5px; color: var(--text-1); }
+    .sa-tool.bad { background: rgba(248,81,73,0.1); color: #f85149; }
+    .sa-open { display: inline-block; margin-top: 0.8rem; color: var(--accent, #f0883e); font-size: 0.85rem; }
   </style>
 
   <script>
-    import { api, type Turn, type TimelineTurn } from '../scripts/api';
+    import { api, type Turn, type TimelineTurn, type SubagentSummary } from '../scripts/api';
     import { turnTokensBar } from '../scripts/charts';
     import { usd, tok, num, dur, escapeHtml } from '../scripts/format';
 
@@ -172,6 +192,12 @@ import Default from '../layouts/Default.astro';
         const reportedDelta = s.agent_reported_cost_usd != null
           ? `<span style="color:var(--text-2);font-size:0.8rem;"> (agent reported: ${usd(s.agent_reported_cost_usd)})</span>` : '';
 
+        if (subAgents?.length) {
+          const subBtn = document.getElementById('tab-btn-subagents')!;
+          subBtn.textContent = `Sub-agents (${subAgents.length})`;
+          subBtn.style.display = '';
+        }
+
         root.innerHTML = `
           <div class="grid-cards" style="margin-bottom:1.2rem;">
             <div class="card kpi"><span class="kpi-label">Tokens</span><span class="kpi-value tokens">${tok(totalTokens)}</span><span class="kpi-sub">${num(totalTokens)} total${subAgents?.length ? ` · incl. ${subAgents.length} sub-agent${subAgents.length === 1 ? '' : 's'}` : ''}</span></div>
@@ -198,14 +224,6 @@ import Default from '../layouts/Default.astro';
               </tbody>
             </table>
           </div>
-
-          ${subAgents?.length ? `
-          <div class="card" style="margin-bottom:1rem;">
-            <h3>Sub-agents (${subAgents.length})</h3>
-            <ul style="margin:0;padding-left:1.2rem;color:var(--text-1);font-size:0.88rem;">
-              ${subAgents.map(id => `<li><a href="/session?id=${encodeURIComponent(id)}" class="mono">${escapeHtml(id)}</a></li>`).join('')}
-            </ul>
-          </div>` : ''}
 
           <div class="card" style="margin-bottom:1rem;">
             <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
@@ -303,23 +321,26 @@ import Default from '../layouts/Default.astro';
       // ─── Tabs ───────────────────────────────────────────────────────
       const overviewPane = document.getElementById('content')!;
       const timelinePane = document.getElementById('timeline-content')!;
+      const subagentsPane = document.getElementById('subagents-content')!;
       const btnOverview = document.getElementById('tab-btn-overview')!;
       const btnTimeline = document.getElementById('tab-btn-timeline')!;
+      const btnSubagents = document.getElementById('tab-btn-subagents')!;
       let timelineLoaded = false;
+      let subagentsLoaded = false;
 
-      function showTab(tab: 'overview' | 'timeline') {
-        const onOverview = tab === 'overview';
-        overviewPane.style.display = onOverview ? '' : 'none';
-        timelinePane.style.display = onOverview ? 'none' : '';
-        btnOverview.classList.toggle('active', onOverview);
-        btnTimeline.classList.toggle('active', !onOverview);
-        if (!onOverview && !timelineLoaded) {
-          timelineLoaded = true;
-          loadTimeline();
-        }
+      function showTab(tab: 'overview' | 'timeline' | 'subagents') {
+        overviewPane.style.display = tab === 'overview' ? '' : 'none';
+        timelinePane.style.display = tab === 'timeline' ? '' : 'none';
+        subagentsPane.style.display = tab === 'subagents' ? '' : 'none';
+        btnOverview.classList.toggle('active', tab === 'overview');
+        btnTimeline.classList.toggle('active', tab === 'timeline');
+        btnSubagents.classList.toggle('active', tab === 'subagents');
+        if (tab === 'timeline' && !timelineLoaded) { timelineLoaded = true; loadTimeline(); }
+        if (tab === 'subagents' && !subagentsLoaded) { subagentsLoaded = true; renderSubagents(); }
       }
       btnOverview.addEventListener('click', () => showTab('overview'));
       btnTimeline.addEventListener('click', () => showTab('timeline'));
+      btnSubagents.addEventListener('click', () => showTab('subagents'));
 
       // ─── Timeline tab ───────────────────────────────────────────────
       // "Burn" = tokens this turn actually generated/consumed at full rate.
@@ -460,6 +481,65 @@ import Default from '../layouts/Default.astro';
           else if (!r.search_enabled) box.textContent = 'enable search indexing in Settings to see tool output';
           else if (!r.found) box.textContent = 'output not indexed — it may have been empty, or restart argus to backfill';
           else box.innerHTML = `<pre>${escapeHtml(r.text!)}</pre>`;
+        });
+      }
+
+      // ─── Sub-agents tab ─────────────────────────────────────────────
+      function saDetail(sa: SubagentSummary): string {
+        const tools = sa.tools.length
+          ? sa.tools.map(t => `<div class="sa-tool${t.errors ? ' bad' : ''}"><span>${escapeHtml(t.name)}</span><span>×${t.count}${t.errors ? ` · ${t.errors} failed` : ''}</span></div>`).join('')
+          : '<p class="sd-no-tools">No tool calls recorded.</p>';
+        return `
+          <div class="sa-stats">
+            <div><span>Turns</span><b>${num(sa.turns)}</b></div>
+            <div><span>Tool calls</span><b>${num(sa.tool_calls)}</b></div>
+            <div><span>Tokens</span><b>${tok(sa.total_tokens)}</b></div>
+            <div><span>Cost (est.)</span><b>~${usd(sa.cost_usd)}</b></div>
+            <div><span>Duration</span><b>${dur(sa.duration_sec)}</b></div>
+            <div><span>Errors</span><b>${num(sa.errors)}</b></div>
+          </div>
+          <div class="sa-task"><b>Task given →</b> ${sa.task_given ? escapeHtml(sa.task_given) : '<span class="sd-no-tools">not available (transcript not indexed)</span>'}</div>
+          <h4 style="margin:0.6rem 0 0.3rem;">Tools used</h4>${tools}
+          <a class="sa-open" href="/session?id=${encodeURIComponent(sa.id)}">Open full timeline for this sub-agent →</a>`;
+      }
+
+      async function renderSubagents() {
+        subagentsPane.innerHTML = '<p class="empty">Loading sub-agents…</p>';
+        let subs: SubagentSummary[] = [];
+        try {
+          subs = (await api.subagents(id!)).subagents;
+        } catch {
+          subagentsPane.innerHTML = '<p class="empty">Sub-agents unavailable.</p>';
+          return;
+        }
+        if (!subs.length) {
+          subagentsPane.innerHTML = '<p class="empty">No sub-agents.</p>';
+          return;
+        }
+        const rows = subs.map((sa, i) => {
+          const dotTitle = sa.status === 'error'
+            ? `${sa.errors} failed tool call${sa.errors === 1 ? '' : 's'}`
+            : 'no failed tool calls';
+          const dot = sa.status === 'error' ? `✗ ${num(sa.errors)}` : '✓';
+          return `
+          <div class="sa-row${i === 0 ? ' sel' : ''}" data-i="${i}">
+            <span class="sa-dot ${sa.status}" title="${dotTitle}">${dot}</span>
+            <code class="mono">${escapeHtml(sa.model)}</code>
+            <span class="sa-meta">${num(sa.tool_calls)} tools · ${tok(sa.total_tokens)}</span>
+          </div>`;
+        }).join('');
+        subagentsPane.innerHTML = `
+          <div class="sa-wrap">
+            <div class="sa-list">${rows}</div>
+            <div class="card sa-detail" id="sa-detail">${saDetail(subs[0])}</div>
+          </div>`;
+        const detail = document.getElementById('sa-detail')!;
+        subagentsPane.querySelectorAll<HTMLElement>('.sa-row').forEach(rowEl => {
+          rowEl.addEventListener('click', () => {
+            subagentsPane.querySelectorAll('.sa-row').forEach(e => e.classList.remove('sel'));
+            rowEl.classList.add('sel');
+            detail.innerHTML = saDetail(subs[Number(rowEl.dataset.i)]);
+          });
         });
       }
 
