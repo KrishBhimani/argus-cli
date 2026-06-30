@@ -570,6 +570,12 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
         ]
         return {"total": r["total"], "segments": segments}
 
+    @api.get("/api/sessions/{session_id:path}/subagents")
+    def session_subagents(session_id: str) -> dict[str, Any]:
+        if repo.get_session(session_id) is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return {"subagents": repo.subagent_summaries(session_id)}
+
     # Registered LAST among /api/sessions/* routes: the greedy {session_id:path}
     # converter would otherwise shadow the suffixed routes (/timeline, etc.).
     @api.get("/api/sessions/{session_id:path}")

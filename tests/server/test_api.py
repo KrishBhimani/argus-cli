@@ -364,3 +364,24 @@ def test_session_routes_accept_slash_ids_and_ordering(repo):
     assert r.status_code == 200
     body = r.json()
     assert "search_enabled" in body and "session" not in body
+
+
+def test_subagents_endpoint(repo):
+    parent = session_factory("claude_code:P", "2026-06-01T00:00:00Z")
+    parent.metadata["sub_agent_session_ids"] = ["claude_code:P/agent-a1"]
+    repo.upsert_session(parent)
+    repo.upsert_session(session_factory("claude_code:P/agent-a1", "2026-06-01T00:00:00Z"))
+    client = TestClient(_make_app(repo))
+
+    r = client.get("/api/sessions/claude_code:P/subagents")
+    assert r.status_code == 200
+    subs = r.json()["subagents"]
+    assert len(subs) == 1 and subs[0]["id"] == "claude_code:P/agent-a1"
+
+    # Unknown parent -> 404.
+    assert client.get("/api/sessions/claude_code:nope/subagents").status_code == 404
+
+    # Childless session -> empty list.
+    repo.upsert_session(session_factory("claude_code:lonely", "2026-06-01T00:00:00Z"))
+    r = client.get("/api/sessions/claude_code:lonely/subagents")
+    assert r.status_code == 200 and r.json() == {"subagents": []}
