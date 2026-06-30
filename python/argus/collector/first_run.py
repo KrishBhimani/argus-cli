@@ -156,7 +156,15 @@ def _backfill_missing_derived_data(
     deep_reset: set[str] = set()
     if repo.is_search_indexing_enabled():
         for c in repo.sessions_missing_segments(200):
-            ids.add(c["id"])
+            # A sub-agent's transcript is only re-read when its parent is
+            # re-ingested with the sub-agent file offsets reset (deep_reset).
+            # The sub-agent id itself is skipped by the loop below ("/" guard),
+            # so route to the parent (a top-level id maps to itself) and force a
+            # deep reset — otherwise sub-agent segments never backfill and the
+            # Sub-agents "Task given" stays empty after enabling indexing.
+            parent = c["id"].split("/", 1)[0]
+            ids.add(parent)
+            deep_reset.add(parent)
         for c in repo.sessions_missing_tool_use_ids(200):
             ids.add(c["id"])
             deep_reset.add(c["id"])
