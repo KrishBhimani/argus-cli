@@ -72,6 +72,11 @@ def test_full_ingest_and_serve_cycle(tmp_path: Path, repo):
     assert len(body["sessions"]) == 1
     assert body["sessions"][0]["total_cost_usd"] > 0
 
+    # Join the background backfill before the `repo` fixture closes the
+    # connection — otherwise the thread writes to a closed sqlite handle and
+    # segfaults a later test.
+    handle.wait_backfill(timeout=10)
+
     r = client.get("/api/overview?window=all")
     overview = r.json()
     assert overview["total_cost_usd"] > 0
