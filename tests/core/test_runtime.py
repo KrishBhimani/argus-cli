@@ -8,6 +8,7 @@ shutdown order preserved.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,119 @@ def test_start_raises_when_no_adapters(tmp_path, monkeypatch):
     rt = CoreRuntime(tmp_path, read_only=False)
     with pytest.raises(NoAdaptersError):
         rt.start()
+
+
+def test_start_tolerates_no_adapters_when_not_required(tmp_path, monkeypatch):
+    """argusd path: missing ~/.claude must not be fatal — idle, don't crash."""
+    monkeypatch.setattr("argus.core.runtime.available_adapters", lambda: [])
+    rt = CoreRuntime(tmp_path, read_only=False, require_adapters=False)
+    rt.start()  # must not raise
+    try:
+        assert rt.adapters == []
+        # Nothing to ingest yet, so no first-pass / watcher / scheduler...
+        assert rt._first_run is None
+        assert rt._watcher is None
+        assert rt._scheduler is None
+        # ...but the DB is open and the runtime is waiting for adapters.
+        assert rt.repo is not None
+        assert rt._adapter_wait is not None and rt._adapter_wait.is_alive()
+    finally:
+        rt.stop()
+    assert rt._adapter_wait is None
+
+
+def test_ingestion_starts_when_adapters_appear_later(
+    tmp_path, monkeypatch, claude_root
+):
+    """The waiting runtime picks up ~/.claude once it shows up."""
+    adapter = ClaudeCodeAdapter(claude_root)
+    present: list[list[ClaudeCodeAdapter]] = [[]]
+    monkeypatch.setattr(
+        "argus.core.runtime.available_adapters", lambda: list(present[0])
+    )
+
+    rt = CoreRuntime(
+        tmp_path, read_only=False, require_adapters=False, adapter_poll_sec=0.01
+    )
+    rt.start()
+    try:
+        assert rt._watcher is None  # nothing yet
+
+        present[0] = [adapter]  # ~/.claude appears
+        for _ in range(500):
+            if rt._scheduler is not None:
+                break
+            time.sleep(0.01)
+
+        assert rt.adapters == [adapter]
+        assert rt._watcher is not None
+        assert rt._scheduler is not None
+        turns = rt.repo.get_turns_for_session("claude_code:s1")
+        assert len(turns) == 1
+    finally:
+        rt.stop()
+
+
+def test_failed_bring_up_rolls_back_and_retries(tmp_path, monkeypatch, claude_root):
+    """A transient failure must not leave the daemon permanently blind."""
+    import argus.core.runtime as runtime_mod
+
+    adapter = ClaudeCodeAdapter(claude_root)
+    present: list[list[ClaudeCodeAdapter]] = [[]]
+    monkeypatch.setattr(
+        "argus.core.runtime.available_adapters", lambda: list(present[0])
+    )
+
+    real_first_pass = runtime_mod.run_first_pass_ingest
+    calls: list[int] = []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("transient — disk hiccup")
+        return real_first_pass(*a, **k)
+
+    monkeypatch.setattr(runtime_mod, "run_first_pass_ingest", flaky)
+
+    rt = CoreRuntime(
+        tmp_path, read_only=False, require_adapters=False, adapter_poll_sec=0.01
+    )
+    rt.start()
+    try:
+        present[0] = [adapter]
+        for _ in range(500):
+            if rt._scheduler is not None:
+                break
+            time.sleep(0.01)
+        assert len(calls) >= 2  # first attempt failed, a later one succeeded
+        assert rt._watcher is not None
+        assert rt._scheduler is not None
+    finally:
+        rt.stop()
+
+
+def test_start_after_stop_reuses_the_runtime(tmp_path, patched_adapters):
+    """stop() must not leave flags set that neuter a subsequent start()."""
+    rt = CoreRuntime(tmp_path, read_only=False, require_adapters=False)
+    rt.start()
+    rt.stop()
+    rt.start()
+    try:
+        assert rt._watcher is not None
+        assert rt._scheduler is not None
+    finally:
+        rt.stop()
+
+
+def test_stop_while_waiting_for_adapters_is_clean(tmp_path, monkeypatch):
+    monkeypatch.setattr("argus.core.runtime.available_adapters", lambda: [])
+    rt = CoreRuntime(
+        tmp_path, read_only=False, require_adapters=False, adapter_poll_sec=0.01
+    )
+    rt.start()
+    rt.stop()
+    rt.stop()  # idempotent
+    assert rt._adapter_wait is None
 
 
 def test_stop_order_scheduler_then_watcher_then_db(tmp_path, patched_adapters):

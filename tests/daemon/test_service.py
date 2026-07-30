@@ -11,6 +11,8 @@ from argus.daemon import pidfile, service
 
 class _FakeRuntime:
     def __init__(self, *a, **k):
+        self.args = a
+        self.kwargs = k
         self.started = False
         self.stopped = False
 
@@ -46,6 +48,24 @@ def test_run_foreground_writes_pid_runs_and_cleans_up(tmp_path, monkeypatch):
     t.join(timeout=3)
     assert fake.stopped is True
     assert pidfile.read(tmp_path) is None  # cleaned up on exit
+
+
+def test_run_foreground_does_not_require_adapters(tmp_path, monkeypatch):
+    """A missing ~/.claude must not kill the service (issue #11)."""
+    made: list[_FakeRuntime] = []
+
+    def _factory(*a, **k):
+        rt = _FakeRuntime(*a, **k)
+        made.append(rt)
+        return rt
+
+    monkeypatch.setattr(service, "CoreRuntime", _factory)
+    stop = threading.Event()
+    stop.set()  # return as soon as the runtime is up
+
+    service.run_foreground(tmp_path, stop_event=stop, install_signals=False)
+
+    assert made[0].kwargs["require_adapters"] is False
 
 
 def test_run_foreground_refuses_when_live_daemon_exists(tmp_path, monkeypatch):

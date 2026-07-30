@@ -6,6 +6,9 @@ runs a read-write CoreRuntime, and blocks until signalled, then cleans up.
 
 The collision guard makes ``run`` independently safe: if a live daemon's PID
 is already on file, it refuses to start rather than orphan the original.
+
+Unlike ``argus start``, the daemon does not treat a missing ``~/.claude/`` as
+fatal — it stays up and begins ingesting when the directory appears.
 """
 from __future__ import annotations
 
@@ -59,7 +62,9 @@ def run_foreground(
                 pass
 
     pidfile.write(data_dir, me)
-    runtime = CoreRuntime(data_dir, read_only=False)
+    # require_adapters=False: a missing ~/.claude must not kill the service.
+    # The runtime idles and starts ingesting once the directory appears.
+    runtime = CoreRuntime(data_dir, read_only=False, require_adapters=False)
     try:
         runtime.start()
         logger.info("argusd started (PID %d).", me)
