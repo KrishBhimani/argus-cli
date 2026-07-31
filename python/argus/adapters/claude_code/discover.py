@@ -66,7 +66,7 @@ def discover_session_files(claude_root: Path) -> list[Path]:
     return out
 
 
-def sub_agent_files_for(session_file: Path) -> list[Path]:
+def sub_agent_files_for(session_file: Path, claude_root: Path) -> list[Path]:
     """Return the sub-agent transcript JSONLs for a session.
 
     Two on-disk layouts coexist under ``<session_dir>/<sid>/subagents/``:
@@ -88,12 +88,25 @@ def sub_agent_files_for(session_file: Path) -> list[Path]:
     sub = session_file.parent / sid / "subagents"
     if not sub.exists():
         return []
+    try:
+        canonical_root = claude_root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return []
     out: set[Path] = set()
     # Flat transcripts directly under subagents/ (dirs like workflows/ have
     # no .jsonl suffix, so they're skipped here).
     out.update(f for f in sub.iterdir() if f.is_file() and f.suffix == ".jsonl")
     # Nested Workflow sub-agent transcripts, any depth below subagents/.
     out.update(f for f in sub.rglob("agent-*.jsonl") if f.is_file())
+    # Same containment rule as discover_session_files: a symlink planted in
+    # subagents/ must not turn into an arbitrary file read. (rglob does not
+    # follow directory symlinks, but a symlinked *file* still resolves out.)
+    dropped = {f for f in out if _safe_realpath_under(f, canonical_root) is None}
+    for f in sorted(dropped):
+        logger.warning(
+            "skipping sub-agent transcript that escapes the claude root: %s", f
+        )
+    out -= dropped
 
     if not out and any(c.is_dir() for c in sub.iterdir()):
         # subagents/ has subdirectories but nothing matched — the layout

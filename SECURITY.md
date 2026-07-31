@@ -80,10 +80,13 @@ Things this codebase deliberately does to reduce attack surface:
   `escapeHtml()` before reaching `innerHTML`. The only HTML allowed
   through is `<mark>...</mark>` from FTS5 `snippet()`, applied via a
   separate `safeSnippet()` helper that escapes everything else.
-- `watchdog` does not follow symlinks by default. `discover_session_files`
-  additionally calls `Path.resolve(strict=True)` on each candidate
-  and rejects anything that doesn't canonicalise under the
-  `~/.claude/` tree.
+- `watchdog` does not follow symlinks by default. Every read additionally
+  goes through `ClaudeCodeAdapter.ingest_file`, which calls
+  `Path.resolve(strict=True)` and refuses anything that doesn't
+  canonicalise under the `~/.claude/` tree — symlink or NTFS junction.
+  The check sits at that single choke point (not at each caller) so
+  discovery, the watcher, and the sub-agent walk are all covered by
+  construction; `sub_agent_files_for` filters as well.
 - Per-tick read cap of 64 MiB on session JSONL and `history.jsonl`,
   so a runaway or hostile multi-GB file can't OOM the process.
 - CSRF Origin check on all non-GET API routes (FastAPI middleware in

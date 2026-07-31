@@ -1,18 +1,21 @@
 """The Claude Code adapter — façade that wires the package together."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..base import AdapterIngestResult
 from ..registry import register
-from .discover import discover_session_files, sub_agent_files_for
+from .discover import _safe_realpath_under, discover_session_files, sub_agent_files_for
 from .history_jsonl import ingest_history_file
-from .ingest_file import ingest_claude_code_file
+from .ingest_file import _empty_result, ingest_claude_code_file
 from .model import canonicalize_claude_model
 
 if TYPE_CHECKING:
     from ...store.repository import Repository
+
+logger = logging.getLogger(__name__)
 
 
 def _default_root() -> Path:
@@ -38,6 +41,14 @@ class ClaudeCodeAdapter:
     def ingest_file(
         self, path: Path, from_offset: int = 0
     ) -> tuple[AdapterIngestResult, int]:
+        # Containment lives here, at the one choke point every read passes
+        # through -- discovery, the watcher's fs events, and the sub-agent
+        # walk in the pipeline all land on this method. Checking here rather
+        # than at each caller is what stops a future call site from quietly
+        # reopening the arbitrary-file-read hole (see discover.py's rules).
+        if _safe_realpath_under(path, self._root) is None:
+            logger.warning("refusing to ingest a path outside the claude root: %s", path)
+            return _empty_result(path), from_offset
         return ingest_claude_code_file(path, from_offset)
 
     # ─── Extension-point overrides ─────────────────────────────────────
@@ -52,7 +63,7 @@ class ClaudeCodeAdapter:
             ingest_history_file(path, repo)
 
     def sub_session_files_for(self, session_file: Path) -> list[Path]:
-        return sub_agent_files_for(session_file)
+        return sub_agent_files_for(session_file, self._root)
 
     def should_skip(self, path: Path) -> bool:
         # The subagents/ tree is walked as part of the parent's ingest,
