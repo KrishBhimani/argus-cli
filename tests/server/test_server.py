@@ -89,7 +89,9 @@ def test_same_origin_post_is_allowed(repo, tmp_path: Path):
                 foreground_complete=True, pending=0, processed=0, total=0
             ),
             dashboard_dir=dist,
-            port=0,
+            # Must match the Origin below: the allowlist is now exact, so a
+            # port=0 app does not trust :4242.
+            port=4242,
             adapters=[],
             pricing_table=PricingTable(version="v1", models={}),
         ),
@@ -213,6 +215,64 @@ def test_rebound_host_is_rejected_on_static_and_search(repo, tmp_path: Path):
     for path in ("/", "/api/sessions", "/api/search?q=", "/api/prompts"):
         r = client.get(path, headers={"host": "evil.com:4242"})
         assert r.status_code == 421, f"{path} served to a rebound Host"
+
+
+# --- Origin allowlist breadth (docs/SECURITY_AUDIT_2026-07-31.md #2) ---------
+# The Origin check used to accept *any* loopback port, so any other local web
+# app -- a `npm run dev` server on :3000 from a cloned repo, a Jupyter kernel,
+# anything with a reflected XSS -- could POST /api/search-index/clear and wipe
+# transcript segments that per ARCHITECTURE.md may exist nowhere else.
+
+
+@pytest.mark.parametrize(
+    "bad_origin",
+    [
+        "http://localhost:3000",  # a dev server: the actual regression
+        "http://127.0.0.1:8888",  # a notebook
+        "http://127.0.0.1:1",
+        "https://localhost:4242",  # right port, wrong scheme
+        "http://localhost:4242.evil.com",
+        "http://evil.example.com",
+        None,
+    ],
+)
+def test_other_localhost_ports_cannot_mutate(repo, tmp_path: Path, bad_origin):
+    """Only argus's own origin may change state, not all of loopback."""
+    client = TestClient(_host_app(repo, tmp_path, port=4242), base_url=LOOPBACK)
+    headers = {"host": "127.0.0.1:4242"}
+    if bad_origin is not None:
+        headers["origin"] = bad_origin
+    r = client.post("/api/search-index/clear", headers=headers)
+    assert r.status_code == 403, f"Origin {bad_origin!r} was allowed to mutate"
+
+
+@pytest.mark.parametrize(
+    "good_origin",
+    ["http://127.0.0.1:4242", "http://localhost:4242", "http://[::1]:4242"],
+)
+def test_dashboards_own_origin_may_mutate(repo, tmp_path: Path, good_origin: str):
+    """However the user reached the dashboard, its own POSTs must work."""
+    client = TestClient(_host_app(repo, tmp_path, port=4242), base_url=LOOPBACK)
+    r = client.post(
+        "/api/search-index/disable",
+        headers={"host": "127.0.0.1:4242", "origin": good_origin},
+    )
+    assert r.status_code == 200, f"Origin {good_origin!r} was rejected"
+
+
+def test_allowed_origin_tracks_the_configured_port(repo, tmp_path: Path):
+    """`argus start --port 9999` must trust :9999 and distrust :4242."""
+    client = TestClient(_host_app(repo, tmp_path, port=9999), base_url=LOOPBACK)
+    ok = client.post(
+        "/api/search-index/disable",
+        headers={"host": "127.0.0.1:9999", "origin": "http://127.0.0.1:9999"},
+    )
+    assert ok.status_code == 200
+    bad = client.post(
+        "/api/search-index/clear",
+        headers={"host": "127.0.0.1:9999", "origin": "http://127.0.0.1:4242"},
+    )
+    assert bad.status_code == 403
 
 
 def test_serve_blocking_ctrl_c_shuts_down_without_traceback(monkeypatch):

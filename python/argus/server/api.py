@@ -93,14 +93,28 @@ def _mcp_server_name(tool_name: str) -> str | None:
     return rest[:sep]
 
 
-def is_allowed_origin(origin: str | None) -> bool:
+def allowed_origins(port: int) -> frozenset[str]:
+    """The exact origins the dashboard itself can be served from."""
+    hosts = ("localhost", "127.0.0.1", "[::1]")
+    out = {f"http://{h}:{port}" for h in hosts}
+    if port == 80:  # browsers omit the default port from Origin
+        out |= {f"http://{h}" for h in hosts}
+    return frozenset(out)
+
+
+def is_allowed_origin(origin: str | None, port: int) -> bool:
+    """True only for argus's *own* origin.
+
+    Exact match, not a prefix test. Trusting all of loopback would mean any
+    other local web app -- a dev server on :3000, a notebook on :8888, anything
+    with a reflected XSS -- could drive state-changing requests here; loopback
+    is a neighbourhood of mutually untrusting web origins, not one principal.
+    Exact comparison also removes the unanchored-``startswith`` foot-gun that
+    let ``http://localhost:4242.evil.com`` through.
+    """
     if not origin:
         return False
-    return (
-        origin.startswith("http://localhost:")
-        or origin.startswith("http://127.0.0.1:")
-        or origin.startswith("http://[::1]:")
-    )
+    return origin.strip().lower() in allowed_origins(port)
 
 
 @dataclass

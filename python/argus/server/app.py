@@ -128,7 +128,7 @@ def build_app(repo: Repository, opts: ServerOpts) -> FastAPI:
             return await call_next(request)
         # Allow API-prefixed paths to enforce the check; non-API endpoints
         # don't exist on this server today, but apply uniformly.
-        if not is_allowed_origin(request.headers.get("origin")):
+        if not is_allowed_origin(request.headers.get("origin"), opts.port):
             return JSONResponse(
                 {"error": "cross-origin requests not allowed"}, status_code=403
             )
