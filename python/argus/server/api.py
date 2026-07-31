@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from ..adapters.base import Adapter
@@ -93,6 +93,13 @@ def _mcp_server_name(tool_name: str) -> str | None:
     return rest[:sep]
 
 
+# Caller-supplied bounds. Generous on purpose: the shipped dashboard requests
+# /api/sessions?limit=100000 (models.astro:52). The point is to stop negative
+# values (SQLite reads LIMIT -1 as *unlimited*) and absurd ones, not to be tidy.
+MAX_ROWS = 1_000_000   # whole-corpus listings the dashboard genuinely pages over
+MAX_PAGE = 1_000       # search / prompts / alerts / transcript result pages
+
+
 def allowed_origins(port: int) -> frozenset[str]:
     """The exact origins the dashboard itself can be served from."""
     hosts = ("localhost", "127.0.0.1", "[::1]")
@@ -149,7 +156,8 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
 
     @api.get("/api/sessions")
     def list_sessions(
-        limit: int = 100, offset: int = 0,
+        limit: int = Query(100, ge=0, le=MAX_ROWS),
+        offset: int = Query(0, ge=0, le=MAX_ROWS),
         agent: str | None = None, includeSub: bool = False,
     ) -> dict[str, Any]:
         sessions = [
@@ -355,7 +363,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
         }
 
     @api.get("/api/alerts")
-    def list_alerts(limit: int = 50) -> dict[str, Any]:
+    def list_alerts(limit: int = Query(50, ge=0, le=MAX_PAGE)) -> dict[str, Any]:
         alerts = repo.list_alerts(limit=min(limit, 200))
         return {"alerts": [a.model_dump() for a in alerts]}
 
@@ -376,7 +384,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
     @api.get("/api/prompts")
     def prompts(
         q: str = "",
-        limit: int = 50,
+        limit: int = Query(50, ge=0, le=MAX_PAGE),
         project: str | None = None,
         include_slash: str = "0",
     ) -> dict[str, Any]:
@@ -435,7 +443,7 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
     @api.get("/api/search")
     def search(
         q: str = "",
-        limit: int = 50,
+        limit: int = Query(50, ge=0, le=MAX_PAGE),
         project: str | None = None,
         include_slash: str = "0",
         roles: str | None = None,
@@ -551,7 +559,9 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
         }
 
     @api.get("/api/sessions/{session_id:path}/transcript")
-    def session_transcript(session_id: str, q: str = "", limit: int = 100) -> dict[str, Any]:
+    def session_transcript(
+        session_id: str, q: str = "", limit: int = Query(100, ge=0, le=MAX_PAGE)
+    ) -> dict[str, Any]:
         limit = min(limit, 500)
         q = q.strip()
         if not q:
