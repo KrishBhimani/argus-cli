@@ -4,7 +4,11 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from .storage import RESERVED_TEMPLATE_NAMES, user_templates_dir
+from .storage import (
+    RESERVED_TEMPLATE_NAMES,
+    user_templates_dir,
+    validate_template_name,
+)
 
 # Never snapshot these — session/history/cache, or machine-local config.
 _EXCLUDED_DIRS = {
@@ -49,6 +53,7 @@ def snapshot_template(
     Raises ``ValueError`` if ``name`` is reserved, the template already exists,
     or there is no ``.claude/`` directory to snapshot. Returns the new template dir.
     """
+    validate_template_name(name)
     if name in RESERVED_TEMPLATE_NAMES:
         raise ValueError(f"'{name}' is reserved, pick another name")
     claude = project_dir / ".claude"

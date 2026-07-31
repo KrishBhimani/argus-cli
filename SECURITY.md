@@ -106,7 +106,11 @@ Things this codebase deliberately does to reduce attack surface:
 - `argus claude` scaffolding is a pure file copy — no templating,
   substitution, or code execution. It writes only to the path you hand
   `init` (created if absent) or under `~/.argus/templates/`, and never
-  overwrites an existing `CLAUDE.md`.
+  overwrites an existing `CLAUDE.md`. That containment is enforced, not
+  just intended: every destination must canonicalise under the target
+  directory, so a hostile repo shipping `.claude/` as a symlink or NTFS
+  junction can't redirect the write, and template names are validated as
+  plain directory names so `--template ../../x` can't escape the store.
 
 If you spot a regression on any of the above, that's a real bug and
 worth reporting.

@@ -288,6 +288,14 @@ def claude_init(
     """Scaffold a .claude/ setup (and CLAUDE.md) into a project."""
     try:
         template_dir = resolve_template(template, data_dir)
+    except ValueError:
+        # Path-like name (e.g. ../../x) — rejected before it touches the disk.
+        typer.echo(
+            f"Invalid template name '{template}'. "
+            "Use a plain name: letters, digits, dot, dash, underscore.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
     except KeyError:
         avail = ", ".join(list_templates(data_dir)) or "(none)"
         typer.echo(f"Unknown template '{template}'. Available: {avail}", err=True)
