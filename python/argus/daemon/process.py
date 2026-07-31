@@ -20,6 +20,12 @@ from . import pidfile
 def daemon_argv(data_dir: Path) -> list[str]:
     return [
         sys.executable,
+        # -P (3.11+) keeps the *caller's* cwd off the child's sys.path. Without
+        # it, `-m` prepends cwd, so running `argus daemon start` from inside a
+        # checkout that ships its own `argus/` directory would run that code
+        # instead of the installed package -- arbitrary execution in a detached
+        # process that outlives the shell.
+        "-P",
         "-m",
         "argus.cli",
         "daemon",

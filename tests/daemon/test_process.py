@@ -28,8 +28,10 @@ def test_spawn_daemon_uses_python_module_invocation(tmp_path, monkeypatch):
 
     assert pid == 54321
     # Absolute python + module entry, not the 'argus' console script.
+    # -P keeps the caller's cwd off the child's sys.path (see
+    # tests/daemon/test_spawn_safe_path.py).
     assert captured["args"][0] == process.sys.executable
-    assert captured["args"][1:5] == ["-m", "argus.cli", "daemon", "run"]
+    assert captured["args"][1:6] == ["-P", "-m", "argus.cli", "daemon", "run"]
     assert "--data-dir" in captured["args"]
     # Detached stdio.
     assert captured["kwargs"]["stdout"] == process.subprocess.DEVNULL
