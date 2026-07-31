@@ -12,6 +12,10 @@ from argus.pricing.types import PricingTable
 from argus.server.api import ApiDeps, build_api
 from tests.conftest import alert_factory, session_factory, turn_factory
 
+# Argus requires a loopback Host header (DNS-rebinding guard in
+# server/app.py); TestClient would otherwise send "Host: testserver".
+LOOPBACK = "http://127.0.0.1"
+
 
 def _make_app(repo, *, daemon: bool = False) -> FastAPI:
     app = FastAPI()
@@ -33,16 +37,16 @@ def _make_app(repo, *, daemon: bool = False) -> FastAPI:
 
 def test_ingest_status_includes_daemon_flag(repo):
     # Default: no daemon.
-    body = TestClient(_make_app(repo)).get("/api/ingest/status").json()
+    body = TestClient(_make_app(repo), base_url=LOOPBACK).get("/api/ingest/status").json()
     assert body["daemon"] is False
     # Read-only/yielded dashboard: daemon=True flows through to the response.
-    body = TestClient(_make_app(repo, daemon=True)).get("/api/ingest/status").json()
+    body = TestClient(_make_app(repo, daemon=True), base_url=LOOPBACK).get("/api/ingest/status").json()
     assert body["daemon"] is True
 
 
 def test_write_endpoints_blocked_in_read_only(repo):
     """When yielded to argusd, write endpoints return 409 — never a 500."""
-    client = TestClient(_make_app(repo, daemon=True))
+    client = TestClient(_make_app(repo, daemon=True), base_url=LOOPBACK)
     for path in (
         "/api/search-index/enable",
         "/api/search-index/disable",
@@ -56,7 +60,7 @@ def test_write_endpoints_blocked_in_read_only(repo):
 
 
 def test_write_endpoints_work_when_not_read_only(repo):
-    client = TestClient(_make_app(repo))  # daemon=False
+    client = TestClient(_make_app(repo), base_url=LOOPBACK)  # daemon=False
     r = client.post("/api/search-index/disable")
     assert r.status_code == 200
     assert r.json()["enabled"] is False
@@ -89,7 +93,7 @@ def test_overview_exposes_token_breakdowns(api_client, repo):
 
 @pytest.fixture
 def api_client(repo):
-    return TestClient(_make_app(repo))
+    return TestClient(_make_app(repo), base_url=LOOPBACK)
 
 
 def _iso(dt: datetime) -> str:
@@ -350,7 +354,7 @@ def test_session_routes_accept_slash_ids_and_ordering(repo):
     sub = session_factory("claude_code:P/agent-a1", "2026-06-01T00:00:00Z")
     repo.upsert_session(parent)
     repo.upsert_session(sub)
-    client = TestClient(_make_app(repo))
+    client = TestClient(_make_app(repo), base_url=LOOPBACK)
 
     # Bare get_session matches a slash id (was unmatchable before :path).
     r = client.get("/api/sessions/claude_code:P/agent-a1")
@@ -371,7 +375,7 @@ def test_subagents_endpoint(repo):
     parent.metadata["sub_agent_session_ids"] = ["claude_code:P/agent-a1"]
     repo.upsert_session(parent)
     repo.upsert_session(session_factory("claude_code:P/agent-a1", "2026-06-01T00:00:00Z"))
-    client = TestClient(_make_app(repo))
+    client = TestClient(_make_app(repo), base_url=LOOPBACK)
 
     r = client.get("/api/sessions/claude_code:P/subagents")
     assert r.status_code == 200

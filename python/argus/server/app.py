@@ -35,6 +35,43 @@ class ServerOpts:
     daemon: bool = False
 
 
+# Host header values that name the loopback interface. A browser only puts one
+# of these in Host when the user actually typed a loopback URL -- an attacker who
+# rebinds evil.com to 127.0.0.1 still sends ``Host: evil.com``, because Host
+# carries the URL's *name*, not the resolved address.
+_LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+
+def is_loopback_host(host_header: str | None) -> bool:
+    """True if ``Host`` names the loopback interface (any port).
+
+    Fails closed on a missing/malformed header: HTTP/1.1 requires Host, and a
+    request without one has no business reaching the dashboard.
+
+    Port-agnostic on purpose. The port adds nothing here -- what defeats DNS
+    rebinding is that the *hostname* must be a loopback literal, and a hostile
+    page cannot obtain one while still believing it is same-origin with its own
+    domain. A direct cross-origin fetch to ``127.0.0.1:4242`` does carry a
+    loopback Host, but the response stays unreadable under the Same-Origin
+    Policy because we emit no CORS headers.
+    """
+    if not host_header:
+        return False
+    h = host_header.strip().lower()
+    if h.startswith("["):  # bracketed IPv6 literal, e.g. [::1]:4242
+        end = h.find("]")
+        if end == -1:
+            return False
+        hostname, rest = h[: end + 1], h[end + 1 :]
+        if rest and not rest.startswith(":"):
+            return False
+    else:
+        hostname, _, port = h.partition(":")
+        if port and not port.isdigit():
+            return False
+    return hostname in _LOOPBACK_HOSTNAMES
+
+
 class SafeStaticFiles(StaticFiles):
     """StaticFiles that 404s (never 500s) on an unservable path.
 
@@ -60,6 +97,26 @@ def build_app(repo: Repository, opts: ServerOpts) -> FastAPI:
         return JSONResponse(
             {"error": "bad request", "detail": exc.errors()}, status_code=400
         )
+
+    # DNS-rebinding guard. The Origin check below deliberately exempts GET, and
+    # every data-bearing route is a GET -- so on its own it does nothing against
+    # a page that rebinds its own domain to 127.0.0.1 and thereby becomes
+    # same-origin with us in the browser's eyes. Requiring a loopback Host is
+    # what actually keeps SECURITY.md's "untrusted browsers cannot read Argus
+    # data" true. Applies to the whole app, static mount included.
+    #
+    # Skipped when the user deliberately bound a non-loopback interface
+    # (`--host 0.0.0.0`, which prints a loud warning): there they reach the
+    # dashboard by LAN IP or hostname, which this allowlist would reject.
+    host_checked = opts.host in ("127.0.0.1", "::1", "localhost")
+
+    @app.middleware("http")
+    async def host_header_check(request: Request, call_next):
+        if host_checked and not is_loopback_host(request.headers.get("host")):
+            return JSONResponse(
+                {"error": "invalid host header"}, status_code=421
+            )
+        return await call_next(request)
 
     # CSRF origin guard for state-changing requests. GETs are unrestricted
     # because the dashboard issues same-origin GETs without an Origin

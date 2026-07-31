@@ -33,8 +33,10 @@ Argus is built for one user, one machine. It assumes:
   before rendering in the dashboard, and never executed.
 - **Untrusted browsers visiting localhost.** Other webpages the user
   loads while Argus is running are not trusted. They cannot read
-  Argus data (Same-Origin Policy on responses) and cannot trigger
-  state changes (CSRF Origin check on POST).
+  Argus data (Same-Origin Policy on responses, backed by a loopback
+  `Host` allowlist so DNS rebinding can't turn a hostile domain into
+  a same-origin one) and cannot trigger state changes (CSRF Origin
+  check on POST).
 
 ## Defaults that matter
 
@@ -86,6 +88,12 @@ Things this codebase deliberately does to reduce attack surface:
   so a runaway or hostile multi-GB file can't OOM the process.
 - CSRF Origin check on all non-GET API routes (FastAPI middleware in
   `python/argus/server/app.py`).
+- Loopback `Host` header allowlist on **every** route, static mount
+  included (`is_loopback_host` in `python/argus/server/app.py`). This is
+  what stops DNS rebinding: a page on `evil.com` that repoints its own
+  DNS at `127.0.0.1` still sends `Host: evil.com` and gets a 421, so it
+  never reaches the GET routes the Origin check deliberately exempts.
+  Skipped only under `--host 0.0.0.0`, which is already a warned opt-out.
 - No build hooks running on user machines. The wheel ships pure Python
   + bundled data (`dashboard-dist/`, `pricing/`, `templates/`).
   Installation runs no arbitrary code.
