@@ -16,7 +16,7 @@ import Default from '../layouts/Default.astro';
   <div id="wf-plan" class="card" style="margin-top:1rem;"></div>
 
   <details id="wf-cost-box" class="card wf-fold" style="margin-top:1rem;">
-    <summary>where the money went</summary>
+    <summary>where the tokens went</summary>
     <div id="wf-cost" style="margin-top:0.7rem;"></div>
   </details>
 
@@ -112,27 +112,28 @@ import Default from '../layouts/Default.astro';
         ? `<ul class="wf-logs">${run.logs.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`
         : ''}`;
 
-    // Cost rollup by phase, from argus's own numbers.
-    const byPhase = new Map<string, { c: number; i: number }>();
+    // Token rollup by phase, from argus's own numbers (falls back to the run
+    // record's own token count when an agent has no linked session row).
+    const tokensOf = (a: WorkflowAgentDetail) => a.total_tokens ?? a.wf_tokens ?? 0;
+    const byPhase = new Map<string, { t: number; i: number }>();
     for (const a of agents) {
-      const cur = byPhase.get(a.phase_title) ?? { c: 0, i: a.phase_index };
-      cur.c += a.cost_usd ?? 0;
+      const cur = byPhase.get(a.phase_title) ?? { t: 0, i: a.phase_index };
+      cur.t += tokensOf(a);
       byPhase.set(a.phase_title, cur);
     }
-    const maxC = Math.max(0.0001, ...[...byPhase.values()].map(v => v.c));
+    const maxT = Math.max(1, ...[...byPhase.values()].map(v => v.t));
     const phaseBars = [...byPhase.entries()]
-      .sort((x, y) => y[1].c - x[1].c)
+      .sort((x, y) => y[1].t - x[1].t)
       .map(([t, v]) => `<div class="wf-bar-row">
         <span>${escapeHtml(t)}</span>
-        <span class="wf-bar"><i style="width:${((v.c / maxC) * 100).toFixed(1)}%;background:${phaseColor(v.i)}"></i></span>
-        <span class="num">${usd(v.c)}</span></div>`).join('');
+        <span class="wf-bar"><i style="width:${((v.t / maxT) * 100).toFixed(1)}%;background:${phaseColor(v.i)}"></i></span>
+        <span class="num">${tok(v.t)}</span></div>`).join('');
     const top = [...agents]
-      .filter(a => a.cost_usd != null)
-      .sort((x, y) => (y.cost_usd ?? 0) - (x.cost_usd ?? 0))
+      .sort((x, y) => tokensOf(y) - tokensOf(x))
       .slice(0, 5)
       .map(a => `<div class="wf-bar-row"><span>${escapeHtml(a.label || a.agent_id)}</span>
-        <span></span><span class="num">${usd(a.cost_usd)}</span></div>`).join('');
-    cost.innerHTML = `${phaseBars}<h4 style="margin-top:0.8rem;">Top spend</h4>${top || '<p class="dim">no linked sessions</p>'}`;
+        <span></span><span class="num">${tok(tokensOf(a))}</span></div>`).join('');
+    cost.innerHTML = `${phaseBars}<h4 style="margin-top:0.8rem;">Top consumers</h4>${top}`;
 
     if (run.has_script) {
       scriptBox.style.display = '';

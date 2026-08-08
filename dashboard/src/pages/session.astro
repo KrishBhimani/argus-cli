@@ -3,6 +3,7 @@ import Default from '../layouts/Default.astro';
 ---
 <Default title="Argus — Session">
   <p style="margin:0 0 1rem;"><a href="/sessions">← All sessions</a></p>
+  <div id="wf-banner" class="wf-banner" style="display:none;"></div>
   <div class="sd-tabs">
     <button id="tab-btn-overview" class="sd-tab active" type="button">Overview</button>
     <button id="tab-btn-timeline" class="sd-tab" type="button">Timeline</button>
@@ -192,6 +193,12 @@ import Default from '../layouts/Default.astro';
     const id = params.get('id');
     const initialQ = params.get('q') ?? '';
     const root = document.getElementById('content')!;
+
+    // Sub-agents payload (subagents + workflow_runs) is fetched at most once
+    // and shared between the always-visible workflow banner and the tab.
+    let _subagentsP: ReturnType<typeof api.subagents> | null = null;
+    const loadSubagents = () => (_subagentsP ??= api.subagents(id!));
+
     if (!id) { root.innerHTML = '<p class="empty">No session id.</p>'; }
     else {
       api.session(id).then(d => {
@@ -206,6 +213,17 @@ import Default from '../layouts/Default.astro';
           const subBtn = document.getElementById('tab-btn-subagents')!;
           subBtn.textContent = `Sub-agents (${subAgents.length})`;
           subBtn.style.display = '';
+
+          // Surface workflow runs on every tab, not just inside Sub-agents.
+          loadSubagents().then(p => {
+            if (!p.workflow_runs.length) return;
+            const banner = document.getElementById('wf-banner')!;
+            banner.innerHTML = `<span class="dim">Part of workflow${p.workflow_runs.length > 1 ? 's' : ''}:</span> ` +
+              p.workflow_runs.map(w =>
+                `<a href="/workflow?id=${encodeURIComponent(w.run_id)}">${escapeHtml(w.name || w.run_id)}</a> <span class="dim">${w.agent_count} agents</span>`
+              ).join(' &middot; ');
+            banner.style.display = '';
+          }).catch(() => {});
         }
 
         root.innerHTML = `
@@ -519,7 +537,7 @@ import Default from '../layouts/Default.astro';
         let workflowRuns: { run_id: string; name: string; agent_count: number }[] = [];
         const labelBySession = new Map<string, { label: string; phase: string; phaseIndex: number; run: string }>();
         try {
-          const payload = await api.subagents(id!);
+          const payload = await loadSubagents();
           subs = payload.subagents;
           workflowRuns = payload.workflow_runs;
           // One detail fetch per run gives every sub-agent its label + phase.

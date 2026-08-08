@@ -327,6 +327,13 @@ th .est { color: var(--text-2); font-weight: 400; text-transform: none; letter-s
 .dim { color: var(--text-2); }
 .bad { color: var(--bad); }
 
+/* Persistent "part of workflow" banner on the session page. */
+.wf-banner {
+  margin: 0 0 0.9rem; padding: 0.5rem 0.8rem; font-size: 0.85rem;
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0;
+}
+
 /* ─── Workflow detail: header stats ────────────────────────────────── */
 .wf-stats { display: flex; flex-wrap: wrap; gap: 1.9rem; margin: 1.1rem 0 0; }
 .wf-stats div { display: flex; flex-direction: column; gap: 0.2rem; }
@@ -345,8 +352,10 @@ th .est { color: var(--text-2); font-weight: 400; text-transform: none; letter-s
 /* ─── Bloom hero (packed-bubble phase clusters) ────────────────────── */
 .wf-hero { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(290px, 1fr); gap: 1rem; align-items: start; }
 @media (max-width: 940px) { .wf-hero { grid-template-columns: 1fr; } }
-.wf-bloom-card { position: relative; padding: 0.85rem 1rem 1rem; overflow: hidden; }
-.wf-bloom { position: relative; width: 100%; }
+/* Stretch the bloom card to the taller of the two columns and centre the
+   bubbles inside it, so the frame never ends short of the detail panel. */
+.wf-bloom-card { position: relative; padding: 0.85rem 1rem 1rem; align-self: stretch; display: flex; flex-direction: column; }
+.wf-bloom { position: relative; width: 100%; flex: 1; display: flex; align-items: center; justify-content: center; }
 .wf-bloom svg { width: 100%; height: auto; display: block; overflow: visible; }
 .wf-bubble { cursor: pointer; outline: none; }
 .wf-bubble circle { transition: filter .12s, stroke-width .12s; }
@@ -359,6 +368,7 @@ th .est { color: var(--text-2); font-weight: 400; text-transform: none; letter-s
   background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px;
   padding: 0.55rem 0.65rem; font-size: 0.72rem; color: var(--text-0);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); pointer-events: none; line-height: 1.55;
+  word-break: break-word; overflow-wrap: anywhere;
 }
 
 /* ─── Bloom detail panel + shared bits ─────────────────────────────── */
