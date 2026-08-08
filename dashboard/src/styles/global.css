@@ -362,3 +362,30 @@ th .est { color: var(--text-2); font-weight: 400; text-transform: none; letter-s
   padding: 0.5rem 0.6rem; font-size: 0.72rem; color: var(--text-0);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4); pointer-events: none;
 }
+
+/* --- Workflow detail page ------------------------------------------ */
+.wf-stats { display: flex; gap: 2rem; flex-wrap: wrap; margin: 1rem 0; }
+.wf-stats div { display: flex; flex-direction: column; }
+.wf-stats b { font-size: 1.5rem; font-weight: 600; }
+.wf-stats span { font-size: 0.72rem; color: var(--text-2); letter-spacing: 0.05em; }
+.wf-stats .bad { color: var(--bad); }
+.wf-swim-card { position: relative; }
+.wf-chips { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.wf-chip {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.15rem 0.6rem; font-size: 0.78rem;
+}
+.wf-logs { margin: 0.6rem 0 0; padding-left: 1.1rem; color: var(--text-1); font-size: 0.82rem; }
+.wf-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 1rem; }
+@media (max-width: 900px) { .wf-split { grid-template-columns: 1fr; } }
+.wf-agent-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+.wf-pre {
+  max-height: 190px; overflow: auto; white-space: pre-wrap;
+  font-size: 0.75rem; color: var(--text-1);
+}
+.wf-bar-row {
+  display: grid; grid-template-columns: 130px 1fr 64px;
+  align-items: center; gap: 0.6rem; font-size: 0.78rem; margin: 0.25rem 0;
+}
+.wf-bar { height: 8px; background: var(--bg-2); border-radius: 3px; overflow: hidden; }
+.wf-bar i { display: block; height: 100%; border-radius: 3px; }
