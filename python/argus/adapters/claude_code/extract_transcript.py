@@ -10,8 +10,26 @@ from .schemas import AssistantLine, UserLine
 SEGMENT_CAP_BYTES = 16 * 1024
 
 
+def _sanitize(s: str) -> str:
+    """Drop lone UTF-16 surrogates so the text can be encoded and stored.
+
+    ``"\\ud800"`` is legal JSON, so ``json.loads`` hands back a str containing
+    an unpaired surrogate — which has no UTF-8 encoding. Every later step
+    (``str.encode`` here, and the SQLite insert) then raises
+    ``UnicodeEncodeError``, and because that escaped the per-line handler it
+    killed the entire ingest pass, not just the offending line.
+
+    Replace rather than drop, so the corruption stays visible in search results
+    instead of silently changing the text.
+    """
+    if s.isascii():  # fast path: the overwhelming majority of segments
+        return s
+    return s.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+
+
 def _cap_text(s: str) -> str:
     """Truncate ``s`` to ``SEGMENT_CAP_BYTES`` UTF-8 bytes with an ellipsis."""
+    s = _sanitize(s)
     encoded = s.encode("utf-8")
     if len(encoded) <= SEGMENT_CAP_BYTES:
         return s

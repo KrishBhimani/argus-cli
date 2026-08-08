@@ -16,15 +16,23 @@ class _Passthrough(BaseModel):
 
 
 class CacheCreation(_Passthrough):
-    ephemeral_5m_input_tokens: int = 0
-    ephemeral_1h_input_tokens: int = 0
+    ephemeral_5m_input_tokens: int = Field(default=0, ge=0, le=2**63 - 1)
+    ephemeral_1h_input_tokens: int = Field(default=0, ge=0, le=2**63 - 1)
+
+
+#: SQLite's INTEGER tops out at 2**63-1. A larger value raises
+#: ``OverflowError: Python int too large to convert to SQLite INTEGER`` at
+#: insert time — far from here, after the line has already been accepted, which
+#: took down the whole ingest. Bound it at the schema instead so the line is
+#: rejected as a normal ParseError and its neighbours still ingest.
+MAX_TOKEN_COUNT = 2**63 - 1
 
 
 class Usage(_Passthrough):
-    input_tokens: int = Field(ge=0)
-    output_tokens: int = Field(ge=0)
-    cache_read_input_tokens: int = Field(default=0, ge=0)
-    cache_creation_input_tokens: int = Field(default=0, ge=0)
+    input_tokens: int = Field(ge=0, le=MAX_TOKEN_COUNT)
+    output_tokens: int = Field(ge=0, le=MAX_TOKEN_COUNT)
+    cache_read_input_tokens: int = Field(default=0, ge=0, le=MAX_TOKEN_COUNT)
+    cache_creation_input_tokens: int = Field(default=0, ge=0, le=MAX_TOKEN_COUNT)
     cache_creation: CacheCreation | None = None
     service_tier: str | None = None
 

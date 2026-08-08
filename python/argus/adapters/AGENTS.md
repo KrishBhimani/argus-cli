@@ -27,6 +27,25 @@ ingests files, `schemas.py` validates each line (`AssistantLine`, `UserLine`, �
 - **`ingest_file(path, offset)` is pure-ish:** it parses from a byte offset and
   returns `(result, new_offset)`. It does not write to the DB — `collector/` owns
   persistence and offset bookkeeping.
+- **One bad line must never stop the file, and the offset must always advance.**
+  A stalled offset is permanent: every later tick re-reads the same bytes and
+  fails identically, so the file (and, when the exception escapes, the whole
+  ingest pass) is wedged for good. Rules that keep that true:
+  - **Measure offsets on raw bytes, never on decoded text.** `errors="replace"`
+    turns each undecodable byte into U+FFFD, which re-encodes to three bytes, so
+    decoded-length arithmetic drifts forward on corrupt input — and drifting
+    past EOF makes `size <= from_offset` true forever.
+  - **`json.loads` raises more than `JSONDecodeError`:** plain `ValueError` above
+    CPython's 4300-digit int limit, `RecursionError` on deep nesting. Catch both.
+  - **Bound anything that reaches SQLite.** Token counts are capped at 2**63-1
+    (`MAX_TOKEN_COUNT`) in `schemas.py`, so an absurd value is a normal
+    `ParseError` here rather than an `OverflowError` at insert time.
+  - **A line longer than `MAX_TICK_BYTES`** has no newline in the window; skip
+    past it via `_seek_past_line` and record why, instead of holding it back as
+    a partial trailing line forever.
+  - **Sanitize lone UTF-16 surrogates** (`_sanitize` in `extract_transcript.py`).
+    `"\ud800"` is legal JSON but has no UTF-8 encoding, so it throws on both
+    `str.encode` and the SQLite insert.
 - **Path containment is enforced at `ClaudeCodeAdapter.ingest_file`, and that is
   deliberate.** It is the one choke point every read reaches — discovery, the
   watcher's fs events, and the pipeline's sub-agent walk — so a path that doesn't

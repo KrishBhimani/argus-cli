@@ -36,6 +36,31 @@ def _empty_result(file_path: Path) -> AdapterIngestResult:
     )
 
 
+def _seek_past_line(file_path: Path, start: int, chunk: int = 1 << 20) -> int:
+    """Byte offset just past the next ``\\n`` at or after ``start``.
+
+    Returns the file size if the oversized line runs to EOF (nothing more to
+    parse), which still advances the offset and ends the stall.
+    """
+    with open(file_path, "rb") as fh:
+        fh.seek(start)
+        pos = start
+        while True:
+            buf = fh.read(chunk)
+            if not buf:
+                return pos
+            nl = buf.find(b"\n")
+            if nl != -1:
+                return pos + nl + 1
+            pos += len(buf)
+
+
+def _result_with_error(file_path: Path, err: ParseError) -> AdapterIngestResult:
+    result = _empty_result(file_path)
+    result.parse_errors.append(err)
+    return result
+
+
 def ingest_claude_code_file(
     file_path: Path, from_offset: int = 0
 ) -> tuple[AdapterIngestResult, int]:
@@ -54,10 +79,40 @@ def ingest_claude_code_file(
         fh.seek(from_offset)
         raw = fh.read(read_len)
 
-    text = raw.decode("utf-8", errors="replace")
-    last_nl = text.rfind("\n")
-    consumable = text[: last_nl + 1] if last_nl != -1 else ""
-    consumed_bytes = len(consumable.encode("utf-8"))
+    # Find the boundary in the RAW BYTES, never in the decoded text. Decoding
+    # with errors="replace" turns each undecodable byte into U+FFFD, which
+    # re-encodes to three bytes — so measuring consumed length on the decoded
+    # string drifts the offset forward on any corrupt input. Drifting past EOF
+    # is itself a permanent wedge: `size <= from_offset` then holds forever and
+    # the file silently stops ingesting.
+    last_nl_b = raw.rfind(b"\n")
+
+    # A line longer than the per-tick cap has no newline anywhere in the window.
+    # Holding it back as a "partial trailing line" would leave the offset where
+    # it was, so every future tick re-reads the same MAX_TICK_BYTES and makes no
+    # progress — the file stalls forever, silently, while burning I/O. Skip past
+    # the oversized line instead and record why.
+    if last_nl_b == -1 and read_len >= MAX_TICK_BYTES:
+        skip_to = _seek_past_line(file_path, from_offset + read_len)
+        return (
+            _result_with_error(
+                file_path,
+                ParseError(
+                    file=str(file_path),
+                    byte_offset=from_offset,
+                    reason=(
+                        f"line exceeds the {MAX_TICK_BYTES}-byte per-tick read cap; "
+                        "skipped so ingestion can continue"
+                    ),
+                    raw_line_truncated=raw[:200].decode("utf-8", errors="replace"),
+                ),
+            ),
+            skip_to,
+        )
+
+    consumable_bytes = raw[: last_nl_b + 1] if last_nl_b != -1 else b""
+    consumed_bytes = len(consumable_bytes)  # exact: measured on the real bytes
+    consumable = consumable_bytes.decode("utf-8", errors="replace")
     new_offset = from_offset + consumed_bytes
 
     assistant_lines: list[AssistantLine] = []
@@ -72,7 +127,12 @@ def ingest_claude_code_file(
         line_bytes = len(line.encode("utf-8"))
         try:
             obj = json.loads(line)
-        except json.JSONDecodeError as e:
+        # Not just JSONDecodeError. json.loads also raises plain ValueError for
+        # an integer over CPython's 4300-digit str->int limit, and
+        # RecursionError for deeply nested arrays/objects. Both escaped the
+        # narrower except and killed the whole file's ingest — permanently,
+        # since the offset never advanced past the line.
+        except (ValueError, RecursionError) as e:
             parse_errors.append(
                 ParseError(
                     file=str(file_path),
