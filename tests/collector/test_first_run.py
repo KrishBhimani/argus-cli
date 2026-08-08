@@ -64,8 +64,12 @@ def test_ingests_recent_files_in_foreground_older_in_background(tmp_path: Path, 
 
     handle.wait_foreground(timeout=10)
     ids_after_fg = sorted(s.id for s in repo.list_sessions(limit=10))
-    # Only the recent file should be ingested at this point.
-    assert ids_after_fg == ["claude_code:recent"]
+    # The foreground guarantee is that the *recent* file is queryable as soon
+    # as wait_foreground() returns. We deliberately do NOT assert the old file
+    # is still absent: the background thread starts immediately, so that would
+    # be asserting it loses a race, which is scheduling luck rather than a
+    # contract. macOS CI ingested both before this line and failed on it.
+    assert "claude_code:recent" in ids_after_fg
     s = handle.status()
     assert s.total == 2
 

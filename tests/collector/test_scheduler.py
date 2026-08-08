@@ -41,12 +41,19 @@ def test_scheduler_runs_detectors_once_on_start(repo):
     det = _StubDetector()
     handle = start_scheduler([det], repo, interval_sec=60)
     try:
-        for _ in range(50):
-            if det.calls >= 1:
+        # Wait for the thing we assert on. Polling `det.calls` and then
+        # asserting on `alerts` is a race: the detector is invoked before the
+        # scheduler upserts its findings, so a loaded runner could observe
+        # calls==1 with the alert not yet written (this failed on Windows CI as
+        # `assert 0 == 1`). Also budget generously — 1s of polling is a
+        # statement about runner speed, not about the scheduler.
+        alerts = []
+        for _ in range(500):
+            alerts = repo.list_alerts(limit=10)
+            if alerts:
                 break
             time.sleep(0.02)
         assert det.calls == 1
-        alerts = repo.list_alerts(limit=10)
         assert len(alerts) == 1
         assert alerts[0].detector == "stub"
     finally:
