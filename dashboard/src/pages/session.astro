@@ -515,8 +515,22 @@ import Default from '../layouts/Default.astro';
       async function renderSubagents() {
         subagentsPane.innerHTML = '<p class="empty">Loading sub-agents…</p>';
         let subs: SubagentSummary[] = [];
+        let workflowRuns: { run_id: string; name: string; agent_count: number }[] = [];
+        const labelBySession = new Map<string, { label: string; phase: string; run: string }>();
         try {
-          subs = (await api.subagents(id!)).subagents;
+          const payload = await api.subagents(id!);
+          subs = payload.subagents;
+          workflowRuns = payload.workflow_runs;
+          // One detail fetch per run gives every sub-agent its label + phase.
+          for (const wr of workflowRuns) {
+            const d = await api.workflow(wr.run_id);
+            if (!d) continue;
+            for (const a of d.agents) {
+              labelBySession.set(a.sub_session_id, {
+                label: a.label, phase: a.phase_title, run: wr.run_id,
+              });
+            }
+          }
         } catch {
           subagentsPane.innerHTML = '<p class="empty">Sub-agents unavailable.</p>';
           return;
@@ -525,19 +539,29 @@ import Default from '../layouts/Default.astro';
           subagentsPane.innerHTML = '<p class="empty">No sub-agents.</p>';
           return;
         }
+        const runBanner = workflowRuns.length
+          ? `<p class="dim" style="margin:0 0 0.6rem;">From ${workflowRuns.map(w =>
+              `<a href="/workflow?id=${encodeURIComponent(w.run_id)}">${escapeHtml(w.name || w.run_id)}</a> (${w.agent_count} agents)`
+            ).join(', ')}</p>`
+          : '';
         const rows = subs.map((sa, i) => {
           const dotTitle = sa.status === 'error'
             ? `${sa.errors} failed tool call${sa.errors === 1 ? '' : 's'}`
             : 'no failed tool calls';
           const dot = sa.status === 'error' ? `✗ ${num(sa.errors)}` : '✓';
+          const wl = labelBySession.get(sa.id);
+          const labelHtml = wl && wl.label
+            ? `<strong>${escapeHtml(wl.label)}</strong> <span class="dim">${escapeHtml(wl.phase)}</span>`
+            : `<code class="mono">${escapeHtml(sa.model)}</code>`;
           return `
           <div class="sa-row${i === 0 ? ' sel' : ''}" data-i="${i}">
             <span class="sa-dot ${sa.status}" title="${dotTitle}">${dot}</span>
-            <code class="mono">${escapeHtml(sa.model)}</code>
+            ${labelHtml}
             <span class="sa-meta">${num(sa.tool_calls)} tools · ${tok(sa.total_tokens)}</span>
           </div>`;
         }).join('');
         subagentsPane.innerHTML = `
+          ${runBanner}
           <div class="sa-wrap">
             <div class="sa-list">${rows}</div>
             <div class="card sa-detail" id="sa-detail">${saDetail(subs[0])}</div>
