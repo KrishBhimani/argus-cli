@@ -49,6 +49,34 @@ def test_app_serves_api_and_static_from_same_root(repo, tmp_path: Path):
     assert "sessions" in r.json()
 
 
+def test_static_cache_headers(repo, tmp_path: Path):
+    # Regression: HTML has a stable URL, so without Cache-Control the browser
+    # heuristically caches it and shows a stale nav after an upgrade. Content-
+    # hashed _astro/* assets are immutable and cache forever.
+    dist = tmp_path / "dashboard-dist"
+    (dist / "_astro").mkdir(parents=True)
+    (dist / "index.html").write_text("<html><body>OK</body></html>", encoding="utf-8")
+    (dist / "_astro" / "app.abc123.js").write_text("console.log(1)", encoding="utf-8")
+
+    app = build_app(
+        repo,
+        ServerOpts(
+            pricing_table_version="v1",
+            ingest_status=lambda: IngestStatus(
+                foreground_complete=True, pending=0, processed=0, total=0
+            ),
+            dashboard_dir=dist,
+            port=0,
+            adapters=[],
+            pricing_table=PricingTable(version="v1", models={}),
+        ),
+    )
+    client = TestClient(app, base_url=LOOPBACK)
+
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    assert "immutable" in client.get("/_astro/app.abc123.js").headers["cache-control"]
+
+
 def test_cross_origin_post_is_rejected(repo, tmp_path: Path):
     dist = tmp_path / "dashboard-dist"
     dist.mkdir()

@@ -24,6 +24,11 @@ the `/api/...` routes over the repository.
   /api/sessions/{id}/subagents` gained an additive `workflow_runs` key; existing
   consumers of `subagents` are untouched. Every new route is a GET, so daemon
   read-only mode is unaffected.
+- **Static assets carry explicit `Cache-Control`.** `SafeStaticFiles.file_response`
+  sends `no-cache` (revalidate-before-use) for stable-URL files (the HTML entry
+  points, `/styles/global.css`) and `immutable` for content-hashed `_astro/*`.
+  Without this the browser heuristically caches the HTML and shows a stale
+  nav/stylesheet after an argus upgrade until a manual hard reload.
 - **Static serving tolerates Windows path quirks.** The dashboard mount uses
   `SafeStaticFiles`, whose `lookup_path` swallows `OSError` and returns
   `("", None)` — needed because a `:` in a URL segment makes Starlette raise on

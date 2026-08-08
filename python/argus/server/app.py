@@ -87,6 +87,25 @@ class SafeStaticFiles(StaticFiles):
         except OSError:
             return "", None
 
+    def file_response(self, full_path, *args, **kwargs):
+        """Force revalidation of stable-URL assets so the browser can't serve a
+        stale nav or stylesheet after an argus upgrade.
+
+        Astro content-hashes everything under ``_astro/`` (a real change means a
+        new filename), so those are safe to cache forever. The HTML entry points
+        and ``/styles/global.css`` keep a stable URL, so without ``Cache-Control``
+        the browser heuristically caches them and shows an old dashboard until a
+        hard reload. ``no-cache`` means "revalidate before use" -- cheap over
+        loopback (a 304 when unchanged), and never stale.
+        """
+        resp = super().file_response(full_path, *args, **kwargs)
+        p = str(full_path).replace("\\", "/")
+        if "/_astro/" in p:
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
 
 def build_app(repo: Repository, opts: ServerOpts) -> FastAPI:
     """Build the FastAPI app with CSRF middleware, API routes, static mount."""
