@@ -15,7 +15,7 @@ first** — it's a 5-minute tour of how the pieces fit together.
 git clone https://github.com/KrishBhimani/argus-code.git
 cd argus-code
 uv sync               # creates .venv and installs deps + dev tools
-uv run pytest         # ~215 tests, ~20s
+uv run pytest         # ~380 tests, ~30s
 uv run argus start    # fast iteration loop — runs directly from source
 ```
 
@@ -32,10 +32,14 @@ locally exactly as a user would:
 ```sh
 cd dashboard && npm ci && npm run build && cd ..
 cp -r dashboard/dist dashboard-dist          # bundle the dashboard
-uv build                                     # wheel + sdist in dist/
-uv tool install ./dist/argus_cli-*.whl       # install globally
+rm -rf dist && uv build                      # wheel + sdist in dist/
+uv tool install ./dist/argus_code-*.whl      # install globally
 argus start
 ```
+
+The distribution is `argus-code` on PyPI (the `argus_code-*.whl` above); the
+command it installs is `argus`. Clear `dist/` first or a stale wheel from an
+earlier version can be picked up by the glob.
 
 ## Tests
 
@@ -54,11 +58,17 @@ for the full catalog.
 
 ## CI
 
-`.github/workflows/test.yml` runs on every push and PR:
+`.github/workflows/test.yml` runs on every push to `main` and every PR:
 
-- **Test matrix:** Ubuntu, macOS, Windows × Python 3.11, 3.12, 3.13.
-- **Dashboard build** (release-only): runs `npm ci && npm run build`
-  before `uv build` to bundle the static dashboard into the wheel.
+- **Test matrix:** Ubuntu, macOS, Windows × Python 3.11, 3.12, 3.13 (9 jobs,
+  `fail-fast: false` so you can see which platform broke).
+- **Dashboard build:** `npm ci && npm run build`, then a check that the
+  tracked `dashboard-dist/` matches what the build produces. A source edit
+  committed without refreshing the shipped copy means users run the old UI —
+  that has historically shipped an unfixed XSS, so the check is a hard fail.
+  It compares file *names*, which Astro content-hashes, rather than bytes
+  (`dashboard-dist/` is tracked and so checked out CRLF on Windows, while a
+  fresh build is LF — a difference that says nothing about staleness).
 
 The Windows runner is non-negotiable — path normalisation, WAL `-shm`
 cleanup, and short-name path quirks are all platform-sensitive.

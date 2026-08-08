@@ -1,0 +1,74 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Don't cancel the whole matrix on one platform's failure — path
+      # handling, symlink behaviour and signal delivery all differ per OS,
+      # and seeing which combination broke is the point.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev --python ${{ matrix.python-version }}
+
+      - name: Run tests
+        run: uv run pytest -q
+
+  dashboard:
+    name: dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install and build
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm run build
+
+      # The wheel ships dashboard-dist/, not dashboard/dist/. If a source edit
+      # is committed without refreshing the shipped copy, users get the old UI
+      # — including, historically, an unfixed XSS. Fail loudly on drift.
+      #
+      # Compare file *names*, not bytes: Astro content-hashes asset filenames,
+      # so any real source change renames the asset. Byte comparison would
+      # instead trip over line endings, since dashboard-dist/ is tracked (and
+      # so checked out CRLF on Windows) while dashboard/dist/ is a fresh LF
+      # build — a difference that says nothing about staleness.
+      - name: Check dashboard-dist is in sync with dashboard/src
+        run: |
+          (cd dashboard/dist && find . -type f | sort) > /tmp/built.txt
+          (cd dashboard-dist  && find . -type f | sort) > /tmp/shipped.txt
+          if ! diff -u /tmp/shipped.txt /tmp/built.txt; then
+            echo "::error::dashboard-dist/ is stale. Rebuild and commit it — see dashboard/AGENTS.md."
+            exit 1
+          fi
+          echo "dashboard-dist matches the build."

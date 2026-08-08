@@ -1,3 +1,10 @@
+> **Historical document.** This is the original planning PRD, kept for the
+> design rationale. It predates several decisions that went the other way and
+> is **not** an accurate description of what shipped. Notably: distribution is
+> PyPI (`pip install argus-code`), not npm; the only supported agent is Claude
+> Code, not Claude Code + Codex. For what Argus actually does today, read
+> [README.md](./README.md) and [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 # Argus — Product Requirements Document (v0.2, MVP)
 
 > v0.2 supersedes v0.1 (working name "AgentLens"). Schemas verified against on-disk logs. Tech stack and data model locked. Most v0.1 open questions are resolved; remaining ones are flagged in §10.

@@ -42,7 +42,7 @@ argus                                   # top-level command group
 │                                       # watcher + ingester + dashboard server
 ├─ pricing
 │  └─ refresh                           # pull latest model prices from LiteLLM
-├─ search
+├─ indexing                            # (was `search` — still works, hidden alias)
 │  ├─ status                            # is transcript indexing on?
 │  ├─ enable                            # turn it on (next start backfills)
 │  ├─ disable                           # turn it off, keep data
@@ -112,7 +112,7 @@ rotations). A few habits worth knowing:
   directly on Windows, so no `argusd stopped.` line is written to the log (the
   CLI still prints it). This is safe — there's no critical in-memory state.
 - **Toggling search:** the dashboard's "Enable indexing" button indexes
-  immediately; the CLI `argus search enable` only flips the flag and defers the
+  immediately; the CLI `argus indexing enable` only flips the flag and defers the
   backfill to the next `argus start` / `argus daemon restart`.
 
 Logs live at `~/.argus/argusd.log` (plain text, rotated at ~1 MB × 3).
@@ -141,11 +141,16 @@ Argus is built for one user on one machine. The defaults reflect that:
 - **Transcript indexing is opt-in.** Cost-and-token analytics work out of
   the box without indexing any text content. Full-text search across
   prompts and transcripts requires explicit opt-in via Settings or
-  `argus search enable`. Opting out actually means out — the API
+  `argus indexing enable`. Opting out actually means out — the API
   returns empty results, even if data is on disk.
 - **Cross-origin POSTs are rejected.** The state-changing endpoints
-  (`/api/search-index/*`) check the `Origin` header so a random tab in
-  your browser can't silently wipe your data while argus is running.
+  (`/api/search-index/*`) check the `Origin` header — matched exactly
+  against argus's own origin — so neither a random tab nor another app
+  on some other localhost port can silently wipe your data.
+- **A loopback `Host` header is required.** This blocks DNS rebinding,
+  where a site you visit repoints its own domain at `127.0.0.1` to become
+  same-origin with argus and read your history. Requests naming any other
+  host get a 421. (Skipped when you deliberately pass `--host 0.0.0.0`.)
 - **No embeddings, no model weights.** Search uses SQLite FTS5 — pure
   inverted-index lexical search. Lookups are deterministic and offline.
 
@@ -227,7 +232,7 @@ set, Argus's own database keeps the data even after Claude rotates it out.
 git clone https://github.com/KrishBhimani/argus-code.git
 cd argus-code
 uv sync               # install deps + create venv
-uv run pytest         # ~245 tests, ~20s
+uv run pytest         # ~380 tests, ~30s
 uv run argus start    # dev — runs directly from source
 ```
 
