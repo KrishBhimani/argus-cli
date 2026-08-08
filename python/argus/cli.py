@@ -15,7 +15,11 @@ import argus.detectors  # noqa: F401  — triggers @register side-effects
 from .pricing.load import load_pricing_table
 from .pricing.refresh import diff_pricing, fetch_litellm_table
 from .scaffold.scaffolder import scaffold_project
-from .scaffold.snapshot import snapshot_candidates, snapshot_template
+from .scaffold.snapshot import (
+    secret_files_in,
+    snapshot_candidates,
+    snapshot_template,
+)
 from .scaffold.storage import RESERVED_TEMPLATE_NAMES, list_templates, resolve_template
 from .server.app import ServerOpts, build_app, serve_blocking
 from .store.db import open_db
@@ -366,6 +370,17 @@ def template_create(
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1)
     typer.echo(f"Created template '{name}' at {target}")
+    # Say what was withheld. A credential filter that drops files silently is
+    # its own bug — the user needs to know the template is deliberately
+    # incomplete, and why.
+    withheld = secret_files_in(project / ".claude")
+    if withheld:
+        typer.echo(
+            "\nLeft out of the template (looks like credentials): "
+            + ", ".join(withheld)
+            + "\nTemplates get copied into every project you scaffold, so "
+            "secrets are never snapshotted."
+        )
 
 
 @app.command()
