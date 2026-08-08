@@ -15,6 +15,10 @@ from argus.schema.types import Prompt, ToolCall, TranscriptSegment
 from argus.server.api import ApiDeps, build_api
 from tests.conftest import session_factory
 
+# Argus requires a loopback Host header (DNS-rebinding guard in
+# server/app.py); TestClient would otherwise send "Host: testserver".
+LOOPBACK = "http://127.0.0.1"
+
 
 def _make_app(repo) -> FastAPI:
     app = FastAPI()
@@ -35,7 +39,7 @@ def _make_app(repo) -> FastAPI:
 
 @pytest.fixture
 def api_client(repo):
-    return TestClient(_make_app(repo))
+    return TestClient(_make_app(repo), base_url=LOOPBACK)
 
 
 def _iso(dt: datetime) -> str:

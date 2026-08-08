@@ -72,7 +72,11 @@ import Default from '../layouts/Default.astro';
             const i = p[0].dataIndex;
             const calls = values[i];
             const err = errors?.[i] ?? 0;
-            return `${labels[i]}<br>Calls: ${calls.toLocaleString()}` +
+            // ECharts renders a custom tooltip formatter's return value as
+            // HTML, so the label -- a tool / MCP-server / sub-agent name read
+            // verbatim from .jsonl -- must be escaped here too, exactly like
+            // every other innerHTML sink on this page.
+            return `${escapeHtml(labels[i])}<br>Calls: ${calls.toLocaleString()}` +
               (err ? `<br>Errors: ${err.toLocaleString()} (${((err/calls)*100).toFixed(1)}%)` : '');
           },
         },

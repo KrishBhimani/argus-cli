@@ -11,6 +11,10 @@ from argus.collector.first_run import run_first_pass_ingest
 from argus.pricing.load import load_pricing_table
 from argus.server.app import ServerOpts, build_app
 
+# Argus requires a loopback Host header (DNS-rebinding guard in
+# server/app.py); TestClient would otherwise send "Host: testserver".
+LOOPBACK = "http://127.0.0.1"
+
 
 def test_full_ingest_and_serve_cycle(tmp_path: Path, repo):
     claude_root = tmp_path / ".claude"
@@ -65,7 +69,7 @@ def test_full_ingest_and_serve_cycle(tmp_path: Path, repo):
             pricing_table=table,
         ),
     )
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
 
     r = client.get("/api/sessions")
     body = r.json()

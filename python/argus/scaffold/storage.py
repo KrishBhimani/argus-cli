@@ -8,10 +8,24 @@ Two tiers:
 """
 from __future__ import annotations
 
+import re
 from importlib import resources
 from pathlib import Path
 
 RESERVED_TEMPLATE_NAMES = {"default"}
+
+# A template name is a single directory name, never a path. Anything with a
+# separator or a traversal component would let `--template ../../x` read a
+# "template" from anywhere on disk, and `template create ../../x` write outside
+# the store. Allowlist the safe shape rather than blocklisting the bad ones.
+_VALID_TEMPLATE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def validate_template_name(name: str) -> str:
+    """Return ``name`` if it is a plain directory name, else raise ``ValueError``."""
+    if not name or name in (".", "..") or not _VALID_TEMPLATE_NAME.match(name):
+        raise ValueError(f"invalid template name: {name!r}")
+    return name
 
 
 def bundled_templates_dir() -> Path:
@@ -49,8 +63,10 @@ def list_templates(data_dir: Path) -> list[str]:
 def resolve_template(name: str, data_dir: Path) -> Path:
     """Return the directory for ``name``, preferring user templates.
 
-    Raises ``KeyError`` if no template with that name exists in either tier.
+    Raises ``ValueError`` if the name is path-like, ``KeyError`` if no template
+    with that name exists in either tier.
     """
+    validate_template_name(name)
     user = user_templates_dir(data_dir) / name
     if user.is_dir():
         return user

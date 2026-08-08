@@ -33,8 +33,10 @@ Argus is built for one user, one machine. It assumes:
   before rendering in the dashboard, and never executed.
 - **Untrusted browsers visiting localhost.** Other webpages the user
   loads while Argus is running are not trusted. They cannot read
-  Argus data (Same-Origin Policy on responses) and cannot trigger
-  state changes (CSRF Origin check on POST).
+  Argus data (Same-Origin Policy on responses, backed by a loopback
+  `Host` allowlist so DNS rebinding can't turn a hostile domain into
+  a same-origin one) and cannot trigger state changes (CSRF Origin
+  check on POST).
 
 ## Defaults that matter
 
@@ -78,14 +80,23 @@ Things this codebase deliberately does to reduce attack surface:
   `escapeHtml()` before reaching `innerHTML`. The only HTML allowed
   through is `<mark>...</mark>` from FTS5 `snippet()`, applied via a
   separate `safeSnippet()` helper that escapes everything else.
-- `watchdog` does not follow symlinks by default. `discover_session_files`
-  additionally calls `Path.resolve(strict=True)` on each candidate
-  and rejects anything that doesn't canonicalise under the
-  `~/.claude/` tree.
+- `watchdog` does not follow symlinks by default. Every read additionally
+  goes through `ClaudeCodeAdapter.ingest_file`, which calls
+  `Path.resolve(strict=True)` and refuses anything that doesn't
+  canonicalise under the `~/.claude/` tree — symlink or NTFS junction.
+  The check sits at that single choke point (not at each caller) so
+  discovery, the watcher, and the sub-agent walk are all covered by
+  construction; `sub_agent_files_for` filters as well.
 - Per-tick read cap of 64 MiB on session JSONL and `history.jsonl`,
   so a runaway or hostile multi-GB file can't OOM the process.
 - CSRF Origin check on all non-GET API routes (FastAPI middleware in
   `python/argus/server/app.py`).
+- Loopback `Host` header allowlist on **every** route, static mount
+  included (`is_loopback_host` in `python/argus/server/app.py`). This is
+  what stops DNS rebinding: a page on `evil.com` that repoints its own
+  DNS at `127.0.0.1` still sends `Host: evil.com` and gets a 421, so it
+  never reaches the GET routes the Origin check deliberately exempts.
+  Skipped only under `--host 0.0.0.0`, which is already a warned opt-out.
 - No build hooks running on user machines. The wheel ships pure Python
   + bundled data (`dashboard-dist/`, `pricing/`, `templates/`).
   Installation runs no arbitrary code.
@@ -95,7 +106,11 @@ Things this codebase deliberately does to reduce attack surface:
 - `argus claude` scaffolding is a pure file copy — no templating,
   substitution, or code execution. It writes only to the path you hand
   `init` (created if absent) or under `~/.argus/templates/`, and never
-  overwrites an existing `CLAUDE.md`.
+  overwrites an existing `CLAUDE.md`. That containment is enforced, not
+  just intended: every destination must canonicalise under the target
+  directory, so a hostile repo shipping `.claude/` as a symlink or NTFS
+  junction can't redirect the write, and template names are validated as
+  plain directory names so `--template ../../x` can't escape the store.
 
 If you spot a regression on any of the above, that's a real bug and
 worth reporting.
