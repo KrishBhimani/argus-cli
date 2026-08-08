@@ -13,6 +13,7 @@ useful feedback and is deliberately kept.
 """
 from __future__ import annotations
 
+import sqlite3
 import threading
 from pathlib import Path
 
@@ -138,13 +139,19 @@ def test_run_foreground_picks_up_claude_created_while_running(
 
         found = False
         for _ in range(200):
-            if (data_dir / "argus.db").exists():
+            # "The file exists" is not "the schema is ready" — SQLite creates
+            # the file the moment it is opened, before migrations run, so a
+            # fast probe queries a table-less DB. Treat every not-yet state
+            # (missing file, missing table, locked) as "keep waiting" rather
+            # than as a failure; the assert below is what decides the outcome.
+            try:
                 probe = open_db(data_dir / "argus.db", read_only=True)
                 try:
-                    if Repository(probe).list_sessions(limit=5):
-                        found = True
+                    found = bool(Repository(probe).list_sessions(limit=5))
                 finally:
                     probe.close()
+            except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError):
+                pass
             if found:
                 break
             threading.Event().wait(0.05)
