@@ -33,6 +33,7 @@ def run_foreground(
     *,
     stop_event: threading.Event | None = None,
     install_signals: bool = True,
+    adapter_poll_sec: float = 30.0,
 ) -> None:
     data_dir = Path(data_dir)
     stop_event = stop_event or threading.Event()
@@ -61,9 +62,16 @@ def run_foreground(
     pidfile.write(data_dir, me)
     runtime = CoreRuntime(data_dir, read_only=False)
     try:
-        runtime.start()
+        # A missing ~/.claude must not kill the service. On a fresh machine, or
+        # one where Claude Code simply hasn't been launched yet, argusd comes up
+        # idle and waits for the directory instead of exiting (issue #11).
+        runtime.start(require_adapters=False)
         logger.info("argusd started (PID %d).", me)
-        stop_event.wait()
+        # Wake periodically so ingest can begin by itself once ~/.claude shows
+        # up; try_activate() is a no-op once we're running.
+        while not stop_event.wait(adapter_poll_sec):
+            if runtime.try_activate():
+                logger.info("Agent data appeared — ingest started.")
     finally:
         runtime.stop()
         pidfile.remove(data_dir)
