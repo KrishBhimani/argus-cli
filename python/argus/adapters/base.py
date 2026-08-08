@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
-from ..schema.types import RawSessionHeader, RawTurnEvent
+from ..schema.types import ParsedWorkflowRun, RawSessionHeader, RawTurnEvent
 
 if TYPE_CHECKING:
     from ..store.repository import Repository
@@ -99,6 +99,16 @@ class Adapter(Protocol):
     def sub_session_files_for(self, session_file: Path) -> list[Path]:
         """Files that roll up into ``session_file`` (e.g., sub-agent JSONLs)."""
         return []
+
+    def workflow_files_for(self, session_file: Path) -> list[Path]:
+        """Orchestration run records belonging to ``session_file``."""
+        return []
+
+    def parse_workflow_record(
+        self, path: Path, session_id: str
+    ) -> ParsedWorkflowRun | None:
+        """Parse one run record. Pure — never writes. None if unrecognized."""
+        return None
 
     def should_skip(self, path: Path) -> bool:
         """Watcher predicate — true to silently ignore events on this path."""

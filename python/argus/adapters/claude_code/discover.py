@@ -117,3 +117,34 @@ def sub_agent_files_for(session_file: Path, claude_root: Path) -> list[Path]:
             session_file.name,
         )
     return sorted(out)
+
+
+def workflow_record_files_for(session_file: Path, claude_root: Path) -> list[Path]:
+    """Return the workflow run records for a session.
+
+    Records live at ``<session_dir>/<sid>/workflows/wf_*.json`` — a *sibling*
+    of ``subagents/``, not inside it. ``glob`` (not ``rglob``) is deliberate:
+    ``workflows/scripts/`` holds the orchestration source, which is already
+    inlined in each record's ``script`` field and must never be read as a
+    record. Same containment rule as everywhere else — a symlink planted here
+    must not become an arbitrary file read.
+    """
+    sid = session_file.stem
+    wf_dir = session_file.parent / sid / "workflows"
+    if not wf_dir.is_dir():
+        return []
+    try:
+        canonical_root = claude_root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return []
+    out: list[Path] = []
+    for f in wf_dir.glob("wf_*.json"):
+        if not f.is_file():
+            continue
+        if _safe_realpath_under(f, canonical_root) is None:
+            logger.warning(
+                "skipping workflow record that escapes the claude root: %s", f
+            )
+            continue
+        out.append(f)
+    return sorted(out)

@@ -5,12 +5,19 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ...schema.types import ParsedWorkflowRun
 from ..base import AdapterIngestResult
 from ..registry import register
-from .discover import _safe_realpath_under, discover_session_files, sub_agent_files_for
+from .discover import (
+    _safe_realpath_under,
+    discover_session_files,
+    sub_agent_files_for,
+    workflow_record_files_for,
+)
 from .history_jsonl import ingest_history_file
 from .ingest_file import _empty_result, ingest_claude_code_file
 from .model import canonicalize_claude_model
+from .workflow_record import parse_workflow_record
 
 if TYPE_CHECKING:
     from ...store.repository import Repository
@@ -64,6 +71,21 @@ class ClaudeCodeAdapter:
 
     def sub_session_files_for(self, session_file: Path) -> list[Path]:
         return sub_agent_files_for(session_file, self._root)
+
+    def workflow_files_for(self, session_file: Path) -> list[Path]:
+        return workflow_record_files_for(session_file, self._root)
+
+    def parse_workflow_record(
+        self, path: Path, session_id: str
+    ) -> ParsedWorkflowRun | None:
+        # Containment again, for the same reason ingest_file checks it: this
+        # is a read call site, and a caller must not be able to bypass it.
+        if _safe_realpath_under(path, self._root) is None:
+            logger.warning(
+                "refusing to read a workflow record outside the claude root: %s", path
+            )
+            return None
+        return parse_workflow_record(path, session_id)
 
     def should_skip(self, path: Path) -> bool:
         # The subagents/ tree is walked as part of the parent's ingest,
