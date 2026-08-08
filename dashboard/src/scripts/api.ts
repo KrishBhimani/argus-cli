@@ -88,6 +88,67 @@ export interface SubagentSummary {
   tools: { name: string; count: number; errors: number }[];
 }
 
+export interface WorkflowRunSummary {
+  run_id: string;
+  session_id: string;
+  name: string;
+  summary: string;
+  status: string;
+  started_at: string;
+  duration_ms: number;
+  agent_count: number;
+  phase_count: number;
+  cost_usd: number;
+  total_tokens: number;
+  tool_calls: number;
+  error_agents: number;
+}
+
+export interface WorkflowAgentDetail {
+  run_id: string;
+  agent_id: string;
+  sub_session_id: string;
+  seq: number;
+  label: string;
+  phase_index: number;
+  phase_title: string;
+  model: string;
+  fallback_model: string;
+  state: string;
+  attempt: number;
+  queued_at: string;
+  started_at: string;
+  last_progress_at: string;
+  duration_ms: number;
+  queue_wait_ms: number;
+  wf_tokens: number;
+  wf_tool_calls: number;
+  last_tool_name: string;
+  last_tool_summary: string;
+  prompt_preview: string;
+  result_preview: string;
+  linked: boolean;
+  turns: number | null;
+  cost_usd: number | null;
+  tokens: { fresh_input: number; output: number; cache_read: number; cache_write: number } | null;
+  total_tokens: number | null;
+  tools: { name: string; count: number; errors: number }[];
+  tool_calls: number;
+  errors: number;
+}
+
+export interface WorkflowDetail {
+  run: WorkflowRunSummary & {
+    task_id: string;
+    default_model: string;
+    wf_total_tokens: number;
+    phases: { title: string; detail: string }[];
+    logs: string[];
+    has_script: boolean;
+  };
+  agents: WorkflowAgentDetail[];
+}
+
 export interface PromptHit {
   id: number;
   timestamp_ms: number;
@@ -122,7 +183,19 @@ export const api = {
       .then(r => r.ok ? r.json() as Promise<{ search_enabled: boolean; found: boolean; text: string | null }> : null),
   subagents: (id: string) =>
     fetch(`/api/sessions/${encodeURIComponent(id)}/subagents`)
-      .then(r => r.json() as Promise<{ subagents: SubagentSummary[] }>),
+      .then(r => r.json() as Promise<{
+        subagents: SubagentSummary[];
+        workflow_runs: { run_id: string; name: string; agent_count: number }[];
+      }>),
+  workflows: (limit = 50, offset = 0) =>
+    fetch(`/api/workflows?limit=${limit}&offset=${offset}`)
+      .then(r => r.json() as Promise<{ workflows: WorkflowRunSummary[]; total: number }>),
+  workflow: (id: string) =>
+    fetch(`/api/workflows/${encodeURIComponent(id)}`)
+      .then(r => r.ok ? r.json() as Promise<WorkflowDetail> : null),
+  workflowScript: (id: string) =>
+    fetch(`/api/workflows/${encodeURIComponent(id)}/script`)
+      .then(r => r.ok ? r.text() : null),
   overview: (window: string) => fetch('/api/overview?window=' + window).then(r => r.json() as Promise<Overview>),
   trends: (granularity: string, groupBy: string) => fetch(`/api/trends?granularity=${granularity}&groupBy=${groupBy}`).then(r => r.json() as Promise<{ points: { bucket: string; groups: Record<string, { cost: number; tokens: number; sessions: number }> }[] }>),
   pricing: () => fetch('/api/pricing').then(r => r.json() as Promise<{ version: string }>),
