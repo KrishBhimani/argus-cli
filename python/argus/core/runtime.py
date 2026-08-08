@@ -112,7 +112,12 @@ class CoreRuntime:
             # Let the background backfill thread finish so it can't write to a
             # closed DB. Returns instantly if already done; bounded so a huge
             # backfill can't hang shutdown indefinitely.
-            self._first_run.wait_backfill(timeout=10)
+            #
+            # join() rather than wait_backfill(): the event is set as the
+            # thread's last statement, leaving a window where it is still
+            # unwinding. Narrow, but the failure mode is a segfault, not an
+            # exception — worth closing properly.
+            self._first_run.join(timeout=10)
             self._first_run = None
         if self._db is not None:
             self._db.close()

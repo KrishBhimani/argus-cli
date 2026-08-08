@@ -9,6 +9,7 @@ import pytest
 from argus.schema.types import Alert, Session, Turn
 from argus.store.db import open_db
 from argus.store.repository import Repository
+from argus.collector.first_run import join_first_run_threads
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────
@@ -23,7 +24,15 @@ def db_path(tmp_path: Path) -> Path:
 def db(db_path: Path):
     conn = open_db(db_path)
     yield conn
+    # First-run's background phase writes to this connection. Closing it while
+    # that thread is mid-write is undefined behaviour — it segfaulted CI (exit
+    # 139), taking the whole pytest process down instead of failing a test.
+    # The guard lives here, at the one place that closes the connection, so a
+    # test that starts first-run cannot reintroduce the race by forgetting to
+    # wait. CoreRuntime.stop() does the equivalent for production.
+    stuck = join_first_run_threads(timeout=10)
     conn.close()
+    assert not stuck, f"first-run thread still running at teardown: {stuck}"
 
 
 @pytest.fixture

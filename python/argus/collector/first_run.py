@@ -28,6 +28,32 @@ class IngestStatus:
     total: int
 
 
+#: Name of the background backfill thread. Public so shutdown paths (and the
+#: test fixture that closes the DB) can find and join it without a handle.
+FIRST_RUN_THREAD_NAME = "argus-firstrun-bg"
+
+
+def join_first_run_threads(timeout: float = 10.0) -> list[str]:
+    """Wait for any live first-run background thread; return those still alive.
+
+    The background phase writes to the SQLite connection. Closing that
+    connection from another thread while it does is undefined behaviour — in
+    CI it segfaulted the whole pytest process (exit 139) rather than failing a
+    test. Anything that closes the DB must come through here first.
+
+    Finds threads by name rather than requiring a handle, so a caller that
+    dropped its ``FirstRunHandle`` is still covered.
+    """
+    deadline = time.monotonic() + timeout
+    for t in [x for x in threading.enumerate() if x.name == FIRST_RUN_THREAD_NAME]:
+        t.join(max(0.0, deadline - time.monotonic()))
+    return [
+        x.name
+        for x in threading.enumerate()
+        if x.name == FIRST_RUN_THREAD_NAME and x.is_alive()
+    ]
+
+
 class FirstRunHandle:
     """Returned by ``run_first_pass_ingest``; exposes foreground/backfill futures."""
 
@@ -38,6 +64,7 @@ class FirstRunHandle:
         self._lock = threading.Lock()
         self._foreground_done = threading.Event()
         self._backfill_done = threading.Event()
+        self._thread: threading.Thread | None = None
 
     def _inc(self) -> None:
         with self._lock:
@@ -57,6 +84,18 @@ class FirstRunHandle:
 
     def wait_backfill(self, timeout: float | None = None) -> bool:
         return self._backfill_done.wait(timeout)
+
+    def join(self, timeout: float | None = None) -> bool:
+        """Wait for the background thread to actually exit; True if it did.
+
+        Stronger than ``wait_backfill``: that returns as soon as the *event* is
+        set, leaving a brief window where the thread is still unwinding. Use
+        this before closing the DB connection.
+        """
+        if self._thread is None:
+            return True
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
 
 
 def run_first_pass_ingest(
@@ -141,7 +180,11 @@ def run_first_pass_ingest(
         _backfill_missing_derived_data(adapters, repo, table)
         handle._backfill_done.set()
 
-    threading.Thread(target=_background, name="argus-firstrun-bg", daemon=True).start()
+    thread = threading.Thread(
+        target=_background, name=FIRST_RUN_THREAD_NAME, daemon=True
+    )
+    handle._thread = thread
+    thread.start()
     return handle
 
 
