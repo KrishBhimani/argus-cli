@@ -21,9 +21,17 @@ ingests files, `schemas.py` validates each line (`AssistantLine`, `UserLine`, �
   `thinking`, `user`, and `tool_result`; each is byte-capped (`_cap_text`). The
   first `user` segment of a sub-agent is its "Task given" in the dashboard.
 - **Known data limitation — do not design against it:** `subagent_type` is empty
-  for every row, sub-agent ids are exactly one level deep, and there is no stored
-  workflow grouping or spawn-turn link. Don't build features that assume a nested
-  sub-agent tree, type pills, or a spawn→child edge; the data isn't there.
+  for every row and sub-agent ids are exactly one level deep. Don't build features
+  that assume a nested sub-agent tree or type pills; the data isn't there. (There
+  is **no** spawn→child *edge* — `pipeline()` stage lineage is not recorded, so a
+  true DAG is impossible. But workflow *grouping* now exists: see below.)
+- **Workflow run records.** `workflow_files_for()` globs
+  `<sid>/workflows/wf_*.json` — a *sibling* of `subagents/`, not inside it — with
+  the same `_safe_realpath_under` containment filter as every other read site. It
+  uses `glob`, not `rglob`, so `workflows/scripts/*.js` (the orchestration source,
+  already inlined in each record's `script` field) is never read as a record.
+  `parse_workflow_record()` is **pure** — it validates containment and returns
+  typed rows, never writing; the collector owns persistence.
 - **`ingest_file(path, offset)` is pure-ish:** it parses from a byte offset and
   returns `(result, new_offset)`. It does not write to the DB — `collector/` owns
   persistence and offset bookkeeping.

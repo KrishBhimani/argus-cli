@@ -32,6 +32,14 @@ migrations; `repository.py` is the typed read/write API over SQLite.
   `_with_unpriced_turns`) feed `collector/first_run.py` — keep their shapes stable.
 - **Upserts are idempotent** (conflict-replace) so re-ingesting a file from a reset
   offset never duplicates or corrupts rows.
+- **Migration 007 — `workflow_runs` + `workflow_agents`.** Archives `Workflow`-tool
+  run records. Storage is deliberately **hybrid**: normalized columns serve every
+  query, and `raw_json` is a capped (2 MB) full-fidelity snapshot that is the
+  re-derive path when a future column is added — the source `wf_*.json` is deleted
+  by Claude Code within days, so anything not captured now is lost forever. The
+  columns and `raw_json` must agree (both are written from one parse). No FK to
+  `sessions`: a run and its sub-sessions can land in either order within a tick, so
+  `workflow_detail` `LEFT JOIN`s and reports `linked: false` rather than failing.
 
 ## Work Guidance
 

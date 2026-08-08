@@ -16,6 +16,14 @@ the `/api/...` routes over the repository.
   suffix route (`/timeline`, `/tool-output/{tool_use_id}`, `/transcript`,
   `/subagents`) must be declared **before** it, or the bare route shadows them. Add
   new session subroutes above the bare handler.
+- **`/api/workflows*` is a fresh top-level prefix**, so it never collides with the
+  greedy `{session_id:path}` route. The three routes are declared **above** the
+  bare session handler (keeping "the bare route is last" literally true), and
+  `/api/workflows/{run_id}/script` is declared **before** the bare
+  `/api/workflows/{run_id}` for the same ordering reason. `GET
+  /api/sessions/{id}/subagents` gained an additive `workflow_runs` key; existing
+  consumers of `subagents` are untouched. Every new route is a GET, so daemon
+  read-only mode is unaffected.
 - **Static serving tolerates Windows path quirks.** The dashboard mount uses
   `SafeStaticFiles`, whose `lookup_path` swallows `OSError` and returns
   `("", None)` — needed because a `:` in a URL segment makes Starlette raise on

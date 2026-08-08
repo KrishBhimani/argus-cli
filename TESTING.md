@@ -300,6 +300,29 @@ assertions don't translate.
   HTTP server on port 0 → `fetch('/api/sessions')` returns the session
   with positive cost → `/api/overview` reflects it
 
+### Workflow observability (Python-only; no TS ancestor)
+
+New test files added with the workflow-archival feature:
+
+- `tests/store/test_workflow_repo.py` — migration 007 (tables, schema version 7,
+  idempotence), run/agent upserts, and the read queries (`list_workflow_runs`
+  cost/error aggregation from argus's own rows, `workflow_detail`'s session +
+  tool join, `linked: false` for missing children, `queue_wait_ms`, and a
+  3-queries-not-1+N assertion via `set_trace_callback`).
+- `tests/adapters/test_workflow_discover.py` — `<sid>/workflows/wf_*.json`
+  discovery, `scripts/` exclusion, and symlink containment (skips without the
+  Windows symlink privilege).
+- `tests/adapters/test_workflow_record.py` — defensive parsing of one record into
+  typed rows (ms→ISO, defaults, agent-id drop, tripwire, `raw_json` cap).
+- `tests/collector/test_workflow_ingest.py` — change detection (the
+  rewrite-in-place `!=` cursor + non-`completed` re-read), parse-failure cursor
+  safety, truncation reporting, and pipeline isolation (a bad record never aborts
+  the parent ingest).
+- `tests/server/test_workflow_api.py` — the three routes, limit/offset clamping,
+  the additive `workflow_runs` subagents key, and the route-order regression.
+- `tests/server/test_workflow_escaping.py` — the API hands back raw
+  model-authored strings and `swimlane.ts` escapes every tooltip field.
+
 ## Regression tests by bug
 
 Quick index of the tests that exist specifically to prevent a regression.
@@ -314,6 +337,8 @@ break, the Python version has reintroduced a real bug that shipped in TS.
 | Transcript segments written even when the user had opt-out flag set | `pipeline.test.ts` "skips writing transcript segments when search indexing flag is OFF" |
 | FTS5 syntax errors on user query crashed the API | (covered indirectly — the two-stage retry pattern in `api.ts`; no dedicated unit test today) |
 | Migration on an old install defaulted indexing OFF and broke existing users | `repository.test.ts` "search indexing flag defaults ON when segments already exist" |
+| Append-only byte-offset cursor missed a workflow snapshot rewritten smaller in place | `tests/collector/test_workflow_ingest.py::test_rewrite_in_place_smaller_is_re_read` |
+| Stored XSS via model-authored workflow text in swimlane tooltips (shape of `444eabb`) | `tests/server/test_workflow_escaping.py::test_swimlane_source_escapes_tooltip_fields` |
 
 ## Fixtures & helpers worth porting once, not per-file
 

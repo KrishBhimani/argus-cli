@@ -27,6 +27,20 @@ scripts in `src/scripts/`.
   `dashboard-dist` before committing.
 - Avoid em dashes / non-ASCII in strings that surface in the **terminal**
   (CLI/console) — they mojibake on the Windows console. (UI text is fine.)
+- **The workflow swimlane is hand-built DOM, not ECharts.** `swimlane.ts` renders
+  CSS-grid rows with absolutely-positioned bars (real hover/focus, text selection,
+  no bundle growth); ECharts stays for the cost rollup only. This holds up to
+  ~1000 bars (the workflow agent cap); past that, collapse phases to summary
+  strips rather than reaching for a canvas `custom` series.
+- **Phase colours are a fixed, CVD-validated order and must not be reordered:**
+  `['#3987e5','#d95926','#199e70','#c98500','#d55181','#9085e9']`, 7th+ = neutral
+  `#6b7585`. `--good`/`--bad` are reserved for ok/error and are never phase hues.
+- **Model-authored workflow text is escaped at the HTML boundary — including
+  inside tooltip strings.** `label`, `prompt_preview`, `result_preview`,
+  `last_tool_summary`, `name`, `summary`, and every log line flow through
+  `escapeHtml()` (the `/tools` stored-XSS fix in `444eabb` was a missed *tooltip*
+  string). The orchestration script renders via `textContent` on a `<pre>`, never
+  `innerHTML`.
 
 ## Verification
 

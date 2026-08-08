@@ -68,6 +68,10 @@ heatmap, Trends line chart, "Last N days" totals.
 - `prompts`, `transcript_segments` (+ FTS5 siblings) — opt-in full-text
   search indexes
 - `file_offsets` — per-file ingest cursor so we re-read only new bytes
+- `workflow_runs`, `workflow_agents` — archived `Workflow`-tool orchestration
+  run records (`<sid>/workflows/wf_*.json`), normalized columns plus a capped
+  `raw_json` snapshot; `workflow_agents.sub_session_id` joins onto `sessions`
+  for tokens/cost. Powers the Workflows list and the `/workflow` swimlane.
 - `parse_errors` — surfaced on Settings → Parse errors
 - `alerts` — detector findings shown on the Overview "What needs
   attention" card; written **only** by the alert scheduler (see below)
@@ -302,6 +306,7 @@ tests/                      pytest suite, mirrors python/argus/ layout
 | Parse a new JSONL field | `python/argus/adapters/claude_code/schemas.py` (pydantic), wire into `pipeline.py` |
 | Tweak cost computation | `python/argus/pricing/compute.py`, then re-ingest to recompute via a backfill |
 | Add a new chart | `dashboard/src/scripts/charts.ts` (theme is shared) |
+| Archive a new sidecar file per session | Add an `Adapter` extension point (default no-op) + a Claude Code discovery glob with `_safe_realpath_under` containment, a pure parser, a collector writer, and a `pipeline.py` call — see the workflow-record path (`adapters/claude_code/workflow_record.py`, `collector/workflow_ingest.py`) |
 | Add a new adapter (Codex, OpenClaw, Hermes, …) | New folder `python/argus/adapters/<agent>/` + `@register class` in `adapter.py`. No edits to CLI / watcher / pipeline / server. |
 | Add an alert detector | New file in `python/argus/detectors/` with a `@register` class whose pure `detect()` returns `Finding`s, plus the side-effect import in `detectors/__init__.py`. The scheduler picks it up automatically. |
 | Change the bundled scaffold template | Edit files under `templates/default/`; they're force-included into the wheel. New top-level dirs need a `force-include` entry in `pyproject.toml`. |
