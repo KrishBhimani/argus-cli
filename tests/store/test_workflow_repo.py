@@ -39,3 +39,61 @@ def test_migration_007_is_idempotent_and_non_destructive(repo, tmp_path):
     rows = conn.execute("SELECT run_id FROM workflow_runs").fetchall()
     assert [r["run_id"] for r in rows] == ["wf_x"]
     conn.close()
+
+
+from argus.schema.types import WorkflowAgent, WorkflowRun
+
+
+def _run(run_id="wf_1", status="completed", **kw):
+    base = dict(
+        run_id=run_id, session_id="claude_code:s1", name="audit",
+        status=status, started_at="2026-07-31T10:51:33Z", duration_ms=1000,
+        agent_count=2,
+    )
+    base.update(kw)
+    return WorkflowRun(**base)
+
+
+def _agent(agent_id="a1", run_id="wf_1", **kw):
+    base = dict(
+        run_id=run_id, agent_id=agent_id,
+        sub_session_id=f"claude_code:s1/agent-{agent_id}",
+        seq=1, label="recon:http", phase_title="Recon", phase_index=1,
+        state="done", duration_ms=500,
+    )
+    base.update(kw)
+    return WorkflowAgent(**base)
+
+
+def test_upsert_workflow_run_roundtrips(repo):
+    repo.upsert_workflow_run(_run())
+    assert repo.workflow_run_status("wf_1") == "completed"
+
+
+def test_workflow_run_status_is_none_for_unknown(repo):
+    assert repo.workflow_run_status("wf_nope") is None
+
+
+def test_upsert_workflow_run_is_idempotent_and_updates(repo):
+    repo.upsert_workflow_run(_run(status="running"))
+    repo.upsert_workflow_run(_run(status="completed"))
+    assert repo.workflow_run_status("wf_1") == "completed"
+    n = repo.db.execute("SELECT COUNT(*) c FROM workflow_runs").fetchone()["c"]
+    assert n == 1
+
+
+def test_upsert_workflow_agents_is_idempotent(repo):
+    repo.upsert_workflow_run(_run())
+    repo.upsert_workflow_agents([_agent("a1"), _agent("a2")])
+    repo.upsert_workflow_agents([_agent("a1", label="renamed")])
+    rows = repo.db.execute(
+        "SELECT agent_id, label FROM workflow_agents ORDER BY agent_id"
+    ).fetchall()
+    assert [(r["agent_id"], r["label"]) for r in rows] == [
+        ("a1", "renamed"), ("a2", "recon:http")
+    ]
+
+
+def test_upsert_workflow_agents_empty_list_is_a_noop(repo):
+    repo.upsert_workflow_agents([])
+    assert repo.db.execute("SELECT COUNT(*) c FROM workflow_agents").fetchone()["c"] == 0

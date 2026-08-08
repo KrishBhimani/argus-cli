@@ -21,6 +21,8 @@ from ..schema.types import (
     ToolCall,
     TranscriptSegment,
     Turn,
+    WorkflowAgent,
+    WorkflowRun,
 )
 
 
@@ -1028,3 +1030,80 @@ class Repository:
             "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('enable_transcript_search', ?)",
             ("1" if enabled else "0",),
         )
+
+    # ─── Workflow runs ─────────────────────────────────────────────────
+
+    def upsert_workflow_run(self, run: WorkflowRun) -> None:
+        self.db.execute(
+            """
+            INSERT INTO workflow_runs (
+              run_id, session_id, name, summary, status, task_id, started_at,
+              duration_ms, agent_count, default_model, wf_total_tokens,
+              wf_total_tools, phases_json, logs_json, script, raw_json
+            ) VALUES (
+              :run_id, :session_id, :name, :summary, :status, :task_id, :started_at,
+              :duration_ms, :agent_count, :default_model, :wf_total_tokens,
+              :wf_total_tools, :phases_json, :logs_json, :script, :raw_json
+            )
+            ON CONFLICT(run_id) DO UPDATE SET
+              session_id=excluded.session_id, name=excluded.name,
+              summary=excluded.summary, status=excluded.status,
+              task_id=excluded.task_id, started_at=excluded.started_at,
+              duration_ms=excluded.duration_ms, agent_count=excluded.agent_count,
+              default_model=excluded.default_model,
+              wf_total_tokens=excluded.wf_total_tokens,
+              wf_total_tools=excluded.wf_total_tools,
+              phases_json=excluded.phases_json, logs_json=excluded.logs_json,
+              script=excluded.script, raw_json=excluded.raw_json
+            """,
+            run.model_dump(),
+        )
+
+    def upsert_workflow_agents(self, agents: list[WorkflowAgent]) -> None:
+        """Insert-or-update by (run_id, agent_id).
+
+        Deliberately an upsert, not delete-then-insert: a mid-flight snapshot
+        holds a subset of the finished run's agents, and agents are only ever
+        added to a run, never removed. Nothing is deleted, per the store's
+        never-destroy-user-data contract.
+        """
+        if not agents:
+            return
+        self.db.executemany(
+            """
+            INSERT INTO workflow_agents (
+              run_id, agent_id, sub_session_id, seq, label, phase_index,
+              phase_title, model, fallback_model, state, attempt, queued_at,
+              started_at, last_progress_at, duration_ms, wf_tokens,
+              wf_tool_calls, last_tool_name, last_tool_summary,
+              prompt_preview, result_preview
+            ) VALUES (
+              :run_id, :agent_id, :sub_session_id, :seq, :label, :phase_index,
+              :phase_title, :model, :fallback_model, :state, :attempt, :queued_at,
+              :started_at, :last_progress_at, :duration_ms, :wf_tokens,
+              :wf_tool_calls, :last_tool_name, :last_tool_summary,
+              :prompt_preview, :result_preview
+            )
+            ON CONFLICT(run_id, agent_id) DO UPDATE SET
+              sub_session_id=excluded.sub_session_id, seq=excluded.seq,
+              label=excluded.label, phase_index=excluded.phase_index,
+              phase_title=excluded.phase_title, model=excluded.model,
+              fallback_model=excluded.fallback_model, state=excluded.state,
+              attempt=excluded.attempt, queued_at=excluded.queued_at,
+              started_at=excluded.started_at,
+              last_progress_at=excluded.last_progress_at,
+              duration_ms=excluded.duration_ms, wf_tokens=excluded.wf_tokens,
+              wf_tool_calls=excluded.wf_tool_calls,
+              last_tool_name=excluded.last_tool_name,
+              last_tool_summary=excluded.last_tool_summary,
+              prompt_preview=excluded.prompt_preview,
+              result_preview=excluded.result_preview
+            """,
+            [a.model_dump() for a in agents],
+        )
+
+    def workflow_run_status(self, run_id: str) -> str | None:
+        row = self.db.execute(
+            "SELECT status FROM workflow_runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        return row["status"] if row else None
