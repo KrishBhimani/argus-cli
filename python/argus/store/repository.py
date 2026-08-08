@@ -1107,3 +1107,164 @@ class Repository:
             "SELECT status FROM workflow_runs WHERE run_id = ?", (run_id,)
         ).fetchone()
         return row["status"] if row else None
+
+    def count_workflow_runs(self) -> int:
+        return self.db.execute("SELECT COUNT(*) c FROM workflow_runs").fetchone()["c"]
+
+    def list_workflow_runs(self, limit: int, offset: int) -> list[dict[str, Any]]:
+        """Runs newest first, with cost/tokens summed from argus's own rows.
+
+        The LEFT JOIN chain yields at most one row per agent (each agent has at
+        most one session), so the SUMs do not fan out. tool_calls is taken from
+        the record's own counter rather than a third join -- it matches argus's
+        count exactly, and joining tool_calls here would multiply the rows the
+        cost SUM sees.
+        """
+        rows = self.db.execute(
+            """
+            SELECT r.run_id, r.session_id, r.name, r.summary, r.status,
+                   r.started_at, r.duration_ms, r.agent_count, r.phases_json,
+                   r.wf_total_tools AS tool_calls,
+                   COALESCE(SUM(s.total_cost_usd), 0) AS cost_usd,
+                   COALESCE(SUM(
+                     s.total_fresh_input_tokens + s.total_output_tokens
+                     + s.total_cache_read_tokens + s.total_cache_write_tokens
+                   ), 0) AS total_tokens,
+                   COALESCE(SUM(CASE WHEN a.state <> 'done' THEN 1 ELSE 0 END), 0)
+                     AS error_agents
+            FROM workflow_runs r
+            LEFT JOIN workflow_agents a ON a.run_id = r.run_id
+            LEFT JOIN sessions s ON s.id = a.sub_session_id
+            GROUP BY r.run_id
+            ORDER BY r.started_at DESC, r.run_id
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            phases = json.loads(d.pop("phases_json") or "[]")
+            d["phase_count"] = len(phases) if isinstance(phases, list) else 0
+            out.append(d)
+        return out
+
+    def workflow_runs_for_session(self, session_id: str) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            """
+            SELECT run_id, name, agent_count FROM workflow_runs
+            WHERE session_id = ? ORDER BY started_at DESC, run_id
+            """,
+            (session_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def workflow_script(self, run_id: str) -> str | None:
+        row = self.db.execute(
+            "SELECT script FROM workflow_runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        return row["script"] if row else None
+
+    def workflow_detail(self, run_id: str) -> dict[str, Any] | None:
+        """Full run + agents. Three queries regardless of agent count."""
+        run_row = self.db.execute(
+            """
+            SELECT run_id, session_id, name, summary, status, task_id, started_at,
+                   duration_ms, agent_count, default_model, wf_total_tokens,
+                   wf_total_tools AS tool_calls, phases_json, logs_json,
+                   LENGTH(script) AS script_len
+            FROM workflow_runs WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if run_row is None:
+            return None
+
+        agent_rows = self.db.execute(
+            """
+            SELECT a.*, s.id AS s_id, s.turn_count, s.total_cost_usd,
+                   s.total_fresh_input_tokens, s.total_output_tokens,
+                   s.total_cache_read_tokens, s.total_cache_write_tokens
+            FROM workflow_agents a
+            LEFT JOIN sessions s ON s.id = a.sub_session_id
+            WHERE a.run_id = ?
+            ORDER BY a.seq, a.agent_id
+            """,
+            (run_id,),
+        ).fetchall()
+
+        tool_rows = self.db.execute(
+            """
+            SELECT t.session_id, t.tool_name AS name, COUNT(*) AS count,
+                   COALESCE(SUM(t.is_error), 0) AS errors
+            FROM tool_calls t
+            JOIN workflow_agents a ON a.sub_session_id = t.session_id
+            WHERE a.run_id = ?
+            GROUP BY t.session_id, t.tool_name
+            ORDER BY count DESC, t.tool_name
+            """,
+            (run_id,),
+        ).fetchall()
+
+        tools_by_session: dict[str, list[dict[str, Any]]] = {}
+        for t in tool_rows:
+            tools_by_session.setdefault(t["session_id"], []).append(
+                {"name": t["name"], "count": t["count"], "errors": t["errors"]}
+            )
+
+        run = dict(run_row)
+        phases = json.loads(run.pop("phases_json") or "[]")
+        logs = json.loads(run.pop("logs_json") or "[]")
+        run["phases"] = phases if isinstance(phases, list) else []
+        run["logs"] = logs if isinstance(logs, list) else []
+        run["phase_count"] = len(run["phases"])
+        run["has_script"] = bool(run.pop("script_len") or 0)
+
+        agents: list[dict[str, Any]] = []
+        total_cost = 0.0
+        total_tokens = 0
+        for r in agent_rows:
+            d = dict(r)
+            linked = d.pop("s_id") is not None
+            tools = tools_by_session.get(d["sub_session_id"], [])
+            q = _iso_to_ms(d["queued_at"])
+            s = _iso_to_ms(d["started_at"])
+            cost = d.pop("total_cost_usd")
+            fi = d.pop("total_fresh_input_tokens")
+            ou = d.pop("total_output_tokens")
+            cr = d.pop("total_cache_read_tokens")
+            cw = d.pop("total_cache_write_tokens")
+            turns = d.pop("turn_count")
+            if linked:
+                total_cost += cost or 0.0
+                total_tokens += (fi or 0) + (ou or 0) + (cr or 0) + (cw or 0)
+            agents.append(
+                {
+                    **d,
+                    "queue_wait_ms": (s - q) if (q is not None and s is not None) else 0,
+                    "linked": linked,
+                    "turns": turns if linked else None,
+                    "cost_usd": cost if linked else None,
+                    "tokens": (
+                        {
+                            "fresh_input": fi, "output": ou,
+                            "cache_read": cr, "cache_write": cw,
+                        }
+                        if linked
+                        else None
+                    ),
+                    "total_tokens": (
+                        (fi or 0) + (ou or 0) + (cr or 0) + (cw or 0)
+                        if linked
+                        else None
+                    ),
+                    "tools": tools,
+                    "tool_calls": sum(t["count"] for t in tools),
+                    "errors": sum(t["errors"] for t in tools),
+                }
+            )
+
+        run["cost_usd"] = total_cost
+        run["total_tokens"] = total_tokens
+        run["error_agents"] = sum(1 for a in agents if a["state"] != "done")
+        return {"run": run, "agents": agents}
