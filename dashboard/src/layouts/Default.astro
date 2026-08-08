@@ -16,6 +16,7 @@ const path = Astro.url.pathname;
     <nav class="app-nav">
       <a href="/" class={path === '/' ? 'active' : ''}>Overview</a>
       <a href="/sessions" class={path.startsWith('/sessions') || path === '/session' ? 'active' : ''}>Sessions</a>
+      <a href="/workflows" class={path === '/workflows' || path === '/workflow' ? 'active' : ''}>Workflows</a>
       <a href="/tools" class={path === '/tools' ? 'active' : ''}>Tools</a>
       <a href="/prompts" class={path === '/prompts' ? 'active' : ''}>Prompts</a>
       <a href="/trends" class={path === '/trends' ? 'active' : ''}>Trends</a>

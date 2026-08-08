@@ -1,0 +1,76 @@
+---
+import Default from '../layouts/Default.astro';
+---
+
+<Default title="Argus — Workflows">
+  <h1 class="page-title">Workflows</h1>
+  <p class="page-sub">Multi-agent orchestration runs archived from this machine.</p>
+  <div id="wf-list"><p class="empty">Loading…</p></div>
+</Default>
+
+<script>
+  import { api } from '../scripts/api';
+  import { escapeHtml, usd, tok, num, shortDate } from '../scripts/format';
+
+  const fmtDur = (msv: number) => {
+    const s = Math.round(msv / 1000);
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+    return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+  };
+
+  const host = document.getElementById('wf-list')!;
+
+  (async () => {
+    let runs;
+    try {
+      runs = (await api.workflows()).workflows;
+    } catch {
+      host.innerHTML = '<p class="empty">Workflows unavailable.</p>';
+      return;
+    }
+
+    if (!runs.length) {
+      // Most users have never run one; explain rather than showing a blank table.
+      host.innerHTML = `
+        <div class="card">
+          <h2>No workflow runs archived yet</h2>
+          <p>A <strong>workflow</strong> is a script that orchestrates many sub-agents
+             at once — fanning work out across phases, then verifying the results.</p>
+          <p>Claude Code writes a run record for each one and deletes it a few days
+             later. Argus now archives those records as they appear, so runs from
+             here on will show up on this page with their phases, per-agent prompts,
+             timings and cost.</p>
+        </div>`;
+      return;
+    }
+
+    host.innerHTML = `
+      <div class="card" style="padding:0;overflow:auto;">
+      <table>
+        <thead><tr>
+          <th>Workflow</th><th>Status</th><th>Started</th>
+          <th class="num">Agents</th><th class="num">Duration</th>
+          <th class="num">Tools</th><th class="num">Tokens</th><th class="num">Cost</th>
+        </tr></thead>
+        <tbody>${runs.map(r => `
+          <tr>
+            <td>
+              <a href="/workflow?id=${encodeURIComponent(r.run_id)}">${escapeHtml(r.name || r.run_id)}</a>
+              <div class="dim">${escapeHtml(r.summary)}</div>
+            </td>
+            <td>${r.error_agents > 0
+                  ? `<span class="tag tag-bad">${num(r.error_agents)} failed</span>`
+                  : `<span class="tag">${escapeHtml(r.status)}</span>`}</td>
+            <td>${escapeHtml(shortDate(r.started_at))}</td>
+            <td class="num">${num(r.agent_count)}</td>
+            <td class="num">${fmtDur(r.duration_ms)}</td>
+            <td class="num">${num(r.tool_calls)}</td>
+            <td class="num">${tok(r.total_tokens)}</td>
+            <td class="num">${usd(r.cost_usd)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>`;
+  })();
+</script>

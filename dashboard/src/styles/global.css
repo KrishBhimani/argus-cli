@@ -216,6 +216,14 @@ th .est { color: var(--text-2); font-weight: 400; text-transform: none; letter-s
 }
 .tag-claude { background: rgba(240, 136, 62, 0.18); color: var(--claude); }
 .tag-codex { background: rgba(88, 166, 255, 0.18); color: var(--codex); }
+.tag:not([class*="tag-"]) { background: var(--bg-2); color: var(--text-1); }
+.tag-bad { background: rgba(248, 81, 73, 0.16); color: var(--bad); }
+
+/* Shared text utilities used by the workflow pages. */
+.page-title { margin: 0 0 0.25rem; font-size: 1.4rem; font-weight: 600; color: var(--text-0); }
+.page-sub { margin: 0 0 1rem; color: var(--text-1); font-size: 0.9rem; }
+.dim { color: var(--text-2); }
+.bad { color: var(--bad); }
 
 .disclaimer {
   font-size: 0.82rem;
