@@ -305,3 +305,52 @@ th .est { color: var(--text-2); font-weight: 400; text-transform: none; letter-s
 .alert-info { border-left-color: var(--codex); }
 .alert-warning { border-left-color: var(--warn); }
 .alert-critical { border-left-color: var(--bad); }
+
+/* --- Workflow swimlane --------------------------------------------- */
+.wf-ribbon { position: relative; height: 46px; margin-bottom: 0.5rem; }
+.wf-ribbon-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.wf-ribbon-label {
+  position: absolute; top: 0; right: 0; z-index: 1;
+  font-size: 0.7rem; color: var(--text-2); letter-spacing: 0.04em;
+}
+.wf-lanes { border-top: 1px solid var(--border); }
+.wf-band { border-bottom: 1px solid var(--border); padding: 0.35rem 0; }
+.wf-band-head {
+  display: flex; align-items: center; gap: 0.45rem;
+  padding: 0.15rem 0 0.3rem; font-size: 0.72rem;
+  color: var(--text-1); letter-spacing: 0.06em; text-transform: uppercase;
+}
+.wf-band-dot { width: 8px; height: 8px; border-radius: 2px; }
+.wf-band-count { color: var(--text-2); }
+.wf-row {
+  display: grid; grid-template-columns: 150px 1fr 34px;
+  align-items: center; gap: 0.5rem;
+  width: 100%; height: 12px; margin: 1px 0; padding: 0;
+  background: none; border: 0; border-left: 2px solid transparent;
+  cursor: pointer; font: inherit; text-align: left;
+}
+.wf-row:hover, .wf-row:focus-visible { background: var(--bg-1); outline: none; }
+.wf-row.sel { background: var(--bg-2); border-left-color: var(--accent); }
+.wf-row-err { border-left-color: var(--bad); }
+.wf-row-label {
+  font-size: 0.7rem; color: var(--text-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wf-row-track { position: relative; height: 8px; }
+.wf-seg { position: absolute; top: 0; height: 8px; }
+.wf-seg-queue { background: repeating-linear-gradient(
+    135deg, var(--bg-2), var(--bg-2) 2px, transparent 2px, transparent 4px); }
+.wf-seg-run { min-width: 3px; border-radius: 0 3px 3px 0; }
+.wf-row-marks { font-size: 0.65rem; color: var(--text-2); }
+.wf-mark-err { color: var(--bad); }
+.wf-axis {
+  position: relative; height: 18px; margin-top: 0.3rem;
+  font-size: 0.68rem; color: var(--text-2);
+}
+.wf-axis span { position: absolute; transform: translateX(-50%); }
+.wf-tip {
+  position: absolute; z-index: 20; max-width: 260px;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.5rem 0.6rem; font-size: 0.72rem; color: var(--text-0);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4); pointer-events: none;
+}
