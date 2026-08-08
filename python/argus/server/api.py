@@ -598,7 +598,39 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
     def session_subagents(session_id: str) -> dict[str, Any]:
         if repo.get_session(session_id) is None:
             raise HTTPException(status_code=404, detail="not found")
-        return {"subagents": repo.subagent_summaries(session_id)}
+        return {
+            "subagents": repo.subagent_summaries(session_id),
+            "workflow_runs": repo.workflow_runs_for_session(session_id),
+        }
+
+    # ─── Workflows ─────────────────────────────────────────────────────
+    # /api/workflows is its own top-level prefix, so it never collides with
+    # the greedy {session_id:path} route. Declared here (above the bare
+    # session handler) so "the bare route is last" stays literally true.
+
+    @api.get("/api/workflows")
+    def list_workflows(
+        limit: int = Query(50, ge=0, le=MAX_PAGE),
+        offset: int = Query(0, ge=0, le=MAX_ROWS),
+    ) -> dict[str, Any]:
+        return {
+            "workflows": repo.list_workflow_runs(limit=limit, offset=offset),
+            "total": repo.count_workflow_runs(),
+        }
+
+    @api.get("/api/workflows/{run_id}/script")
+    def workflow_script(run_id: str) -> PlainTextResponse:
+        script = repo.workflow_script(run_id)
+        if script is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return PlainTextResponse(script)
+
+    @api.get("/api/workflows/{run_id}")
+    def workflow_detail(run_id: str) -> dict[str, Any]:
+        detail = repo.workflow_detail(run_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return detail
 
     # Registered LAST among /api/sessions/* routes: the greedy {session_id:path}
     # converter would otherwise shadow the suffixed routes (/timeline, etc.).

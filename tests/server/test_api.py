@@ -385,7 +385,8 @@ def test_subagents_endpoint(repo):
     # Unknown parent -> 404.
     assert client.get("/api/sessions/claude_code:nope/subagents").status_code == 404
 
-    # Childless session -> empty list.
+    # Childless session -> empty list. The payload also carries workflow_runs
+    # (additive key added with the workflow-observability feature).
     repo.upsert_session(session_factory("claude_code:lonely", "2026-06-01T00:00:00Z"))
     r = client.get("/api/sessions/claude_code:lonely/subagents")
-    assert r.status_code == 200 and r.json() == {"subagents": []}
+    assert r.status_code == 200 and r.json() == {"subagents": [], "workflow_runs": []}
