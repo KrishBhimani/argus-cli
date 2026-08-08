@@ -106,7 +106,9 @@ def test_migration_006_adds_tool_use_id_column(db):
     cols = {r["name"] for r in db.execute("PRAGMA table_info(transcript_segments)")}
     assert "tool_use_id" in cols
     row = db.execute("SELECT value FROM app_meta WHERE key = 'schema_version'").fetchone()
-    assert int(row["value"]) == 6
+    # open_db migrates to the latest SCHEMA_VERSION (7 since migration 007
+    # added the workflow tables); 006's tool_use_id column is what this asserts.
+    assert int(row["value"]) == 7
 
 
 def test_migration_006_index_exists(db):
@@ -135,13 +137,15 @@ def test_open_db_recovers_from_half_applied_migration(db_path):
     )
     conn.close()
 
-    # Re-open must not raise, must finish at v6, and must heal the missing index.
+    # Re-open must not raise, must finish at the latest version, and must heal
+    # the missing index. (Latest is 7 since migration 007; the half-applied
+    # state pinned at 5 still recovers through 006 and on to 7.)
     conn = open_db(db_path)
     try:
         ver = conn.execute(
             "SELECT value FROM app_meta WHERE key = 'schema_version'"
         ).fetchone()
-        assert int(ver["value"]) == 6
+        assert int(ver["value"]) == 7
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(transcript_segments)")}
         assert "tool_use_id" in cols
         idx = {

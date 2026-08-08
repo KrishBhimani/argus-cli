@@ -156,3 +156,58 @@ class Alert(BaseModel):
     last_seen_at: str
     seen_at: str | None = None
     resolved_at: str | None = None
+
+
+class WorkflowRun(BaseModel):
+    """One orchestration run record (Workflow tool invocation)."""
+
+    run_id: str
+    session_id: str
+    name: str = ""
+    summary: str = ""
+    status: str = ""
+    task_id: str = ""
+    started_at: str = ""
+    duration_ms: int = 0
+    agent_count: int = 0
+    default_model: str = ""
+    wf_total_tokens: int = 0
+    wf_total_tools: int = 0
+    phases_json: str = "[]"
+    logs_json: str = "[]"
+    script: str = ""
+    raw_json: str = ""
+
+
+class WorkflowAgent(BaseModel):
+    """One agent() spawn inside a workflow run."""
+
+    run_id: str
+    agent_id: str
+    sub_session_id: str
+    seq: int = 0
+    label: str = ""
+    phase_index: int = 0
+    phase_title: str = ""
+    model: str = ""
+    fallback_model: str = ""
+    state: str = ""
+    attempt: int = 1
+    queued_at: str = ""
+    started_at: str = ""
+    last_progress_at: str = ""
+    duration_ms: int = 0
+    wf_tokens: int = 0
+    wf_tool_calls: int = 0
+    last_tool_name: str = ""
+    last_tool_summary: str = ""
+    prompt_preview: str = ""
+    result_preview: str = ""
+
+
+class ParsedWorkflowRun(BaseModel):
+    """Parser output. ``truncated_bytes`` > 0 means raw_json was capped."""
+
+    run: WorkflowRun
+    agents: list[WorkflowAgent] = []
+    truncated_bytes: int = 0

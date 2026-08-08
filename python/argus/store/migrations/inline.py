@@ -183,3 +183,54 @@ MIGRATION_006 = """
 ALTER TABLE transcript_segments ADD COLUMN tool_use_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_segments_tool_use ON transcript_segments(session_id, tool_use_id);
 """
+
+MIGRATION_007 = """
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  run_id            TEXT PRIMARY KEY,
+  session_id        TEXT NOT NULL,
+  name              TEXT NOT NULL DEFAULT '',
+  summary           TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL DEFAULT '',
+  task_id           TEXT NOT NULL DEFAULT '',
+  started_at        TEXT NOT NULL DEFAULT '',
+  duration_ms       INTEGER NOT NULL DEFAULT 0,
+  agent_count       INTEGER NOT NULL DEFAULT 0,
+  default_model     TEXT NOT NULL DEFAULT '',
+  wf_total_tokens   INTEGER NOT NULL DEFAULT 0,
+  wf_total_tools    INTEGER NOT NULL DEFAULT 0,
+  phases_json       TEXT NOT NULL DEFAULT '[]',
+  logs_json         TEXT NOT NULL DEFAULT '[]',
+  script            TEXT NOT NULL DEFAULT '',
+  raw_json          TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_session ON workflow_runs(session_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_started ON workflow_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_agents (
+  run_id            TEXT NOT NULL,
+  agent_id          TEXT NOT NULL,
+  sub_session_id    TEXT NOT NULL,
+  seq               INTEGER NOT NULL DEFAULT 0,
+  label             TEXT NOT NULL DEFAULT '',
+  phase_index       INTEGER NOT NULL DEFAULT 0,
+  phase_title       TEXT NOT NULL DEFAULT '',
+  model             TEXT NOT NULL DEFAULT '',
+  fallback_model    TEXT NOT NULL DEFAULT '',
+  state             TEXT NOT NULL DEFAULT '',
+  attempt           INTEGER NOT NULL DEFAULT 1,
+  queued_at         TEXT NOT NULL DEFAULT '',
+  started_at        TEXT NOT NULL DEFAULT '',
+  last_progress_at  TEXT NOT NULL DEFAULT '',
+  duration_ms       INTEGER NOT NULL DEFAULT 0,
+  wf_tokens         INTEGER NOT NULL DEFAULT 0,
+  wf_tool_calls     INTEGER NOT NULL DEFAULT 0,
+  last_tool_name    TEXT NOT NULL DEFAULT '',
+  last_tool_summary TEXT NOT NULL DEFAULT '',
+  prompt_preview    TEXT NOT NULL DEFAULT '',
+  result_preview    TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (run_id, agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_agents_sub ON workflow_agents(sub_session_id);
+"""
