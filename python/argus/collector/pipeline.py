@@ -9,6 +9,7 @@ from ..schema.types import RawSessionHeader, Session, ToolCall, TranscriptSegmen
 from ..store.repository import Repository
 from .aggregate import build_session, build_turn
 from .rollup_subagents import rollup_subagents
+from .workflow_ingest import ingest_workflow_records
 
 
 def _header_for_recompute(
@@ -182,6 +183,22 @@ def ingest_file(
                 stored_sub = repo.get_session(f"{session_id}/{sub.stem}")
                 if stored_sub is not None:
                     sub_sessions.append(stored_sub)
+
+    # Workflow run records live at <sid>/workflows/wf_*.json -- a sibling of
+    # subagents/, not inside it. Wrapped: orchestration metadata is a bonus,
+    # session data is the product, so a bad record must never cost us turns.
+    if not adapter.should_skip(file_path):
+        try:
+            ingest_workflow_records(adapter, file_path, session_id, repo)
+        except Exception as e:  # noqa: BLE001
+            repo.record_parse_error(
+                {
+                    "file": file_str,
+                    "byte_offset": -1,
+                    "reason": f"[workflow] {e}",
+                    "raw_line_truncated": "",
+                }
+            )
 
     # Recompute the parent (and re-apply the rollup) only when something
     # actually changed: new parent turns, a grown sub-file, or a brand-new
