@@ -1,10 +1,10 @@
 """Model-authored workflow text must reach the browser escaped.
 
 Regression: commit 444eabb fixed stored XSS in /tools chart tooltips. The
-workflow page renders label / prompt_preview / result_preview / last_tool_summary
-into innerHTML AND into tooltip strings -- the tooltip is where it hid last time.
-The API must hand back the raw string (escaping is the renderer's job), and the
-built bundle must call escapeHtml on the tooltip path.
+workflow bloom renders label / phase_title / model / last_tool_name /
+fallback_model into innerHTML AND into tooltip strings -- the tooltip is where
+it hid last time. The API must hand back the raw string (escaping is the
+renderer's job), and the built bundle must call escapeHtml on the tooltip path.
 """
 from __future__ import annotations
 
@@ -90,8 +90,8 @@ def test_api_returns_the_raw_string_for_the_client_to_escape(client, repo,
     assert a["prompt_preview"] == PAYLOAD
 
 
-def test_swimlane_source_escapes_tooltip_fields():
-    src = Path("dashboard/src/scripts/swimlane.ts").read_text(encoding="utf-8")
+def test_bloom_source_escapes_tooltip_fields():
+    src = Path("dashboard/src/scripts/bloom.ts").read_text(encoding="utf-8")
     tip = src.split("function tooltipHtml")[1].split("\nexport function")[0]
     for field in ("a.label", "a.phase_title", "a.model", "a.last_tool_name",
                   "a.fallback_model"):

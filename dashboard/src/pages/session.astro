@@ -151,6 +151,7 @@ import Default from '../layouts/Default.astro';
     import { api, type Turn, type TimelineTurn, type SubagentSummary } from '../scripts/api';
     import { turnTokensBar } from '../scripts/charts';
     import { usd, tok, num, dur, escapeHtml } from '../scripts/format';
+    import { phaseColor } from '../scripts/bloom';
 
     const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const TZ_ABBREV = (() => {
@@ -516,7 +517,7 @@ import Default from '../layouts/Default.astro';
         subagentsPane.innerHTML = '<p class="empty">Loading sub-agents…</p>';
         let subs: SubagentSummary[] = [];
         let workflowRuns: { run_id: string; name: string; agent_count: number }[] = [];
-        const labelBySession = new Map<string, { label: string; phase: string; run: string }>();
+        const labelBySession = new Map<string, { label: string; phase: string; phaseIndex: number; run: string }>();
         try {
           const payload = await api.subagents(id!);
           subs = payload.subagents;
@@ -527,7 +528,7 @@ import Default from '../layouts/Default.astro';
             if (!d) continue;
             for (const a of d.agents) {
               labelBySession.set(a.sub_session_id, {
-                label: a.label, phase: a.phase_title, run: wr.run_id,
+                label: a.label, phase: a.phase_title, phaseIndex: a.phase_index, run: wr.run_id,
               });
             }
           }
@@ -539,32 +540,56 @@ import Default from '../layouts/Default.astro';
           subagentsPane.innerHTML = '<p class="empty">No sub-agents.</p>';
           return;
         }
-        const runBanner = workflowRuns.length
-          ? `<p class="dim" style="margin:0 0 0.6rem;">From ${workflowRuns.map(w =>
-              `<a href="/workflow?id=${encodeURIComponent(w.run_id)}">${escapeHtml(w.name || w.run_id)}</a> (${w.agent_count} agents)`
-            ).join(', ')}</p>`
-          : '';
-        const rows = subs.map((sa, i) => {
+
+        // One row. Workflow agents get a colour-coded phase dot + their label;
+        // plain (non-workflow) sub-agents fall back to the model name. `sel`
+        // marks the first row so the detail panel has something to show.
+        const rowHtml = (sa: SubagentSummary, i: number, sel: boolean) => {
           const dotTitle = sa.status === 'error'
             ? `${sa.errors} failed tool call${sa.errors === 1 ? '' : 's'}`
             : 'no failed tool calls';
           const dot = sa.status === 'error' ? `✗ ${num(sa.errors)}` : '✓';
           const wl = labelBySession.get(sa.id);
           const labelHtml = wl && wl.label
-            ? `<strong>${escapeHtml(wl.label)}</strong> <span class="dim">${escapeHtml(wl.phase)}</span>`
+            ? `<span class="sa-phase-dot" style="background:${phaseColor(wl.phaseIndex)}" title="${escapeHtml(wl.phase)}"></span><strong>${escapeHtml(wl.label)}</strong>`
             : `<code class="mono">${escapeHtml(sa.model)}</code>`;
           return `
-          <div class="sa-row${i === 0 ? ' sel' : ''}" data-i="${i}">
+          <div class="sa-row${sel ? ' sel' : ''}" data-i="${i}">
             <span class="sa-dot ${sa.status}" title="${dotTitle}">${dot}</span>
             ${labelHtml}
             <span class="sa-meta">${num(sa.tool_calls)} tools · ${tok(sa.total_tokens)}</span>
           </div>`;
-        }).join('');
+        };
+
+        // Group rows under their workflow run (with an "Other sub-agents"
+        // bucket for plain Task children), so the model-name rows and the
+        // labelled rows stop interleaving.
+        const entries = subs.map((sa, i) => ({ sa, i }));
+        const claimed = new Set<number>();
+        const groups: { head: string; entries: { sa: SubagentSummary; i: number }[] }[] = [];
+        for (const wr of workflowRuns) {
+          const es = entries.filter(e => labelBySession.get(e.sa.id)?.run === wr.run_id);
+          es.forEach(e => claimed.add(e.i));
+          if (es.length) groups.push({
+            head: `<div class="sa-group-head"><a href="/workflow?id=${encodeURIComponent(wr.run_id)}">${escapeHtml(wr.name || wr.run_id)}</a> &middot; ${es.length} agents</div>`,
+            entries: es,
+          });
+        }
+        const others = entries.filter(e => !claimed.has(e.i));
+        if (others.length) groups.push({
+          head: workflowRuns.length
+            ? `<div class="sa-group-head">Other sub-agents &middot; ${others.length}</div>` : '',
+          entries: others,
+        });
+
+        const first = groups[0]?.entries[0];
+        const listHtml = groups.map(g =>
+          g.head + g.entries.map(e => rowHtml(e.sa, e.i, e === first)).join('')
+        ).join('');
         subagentsPane.innerHTML = `
-          ${runBanner}
           <div class="sa-wrap">
-            <div class="sa-list">${rows}</div>
-            <div class="card sa-detail" id="sa-detail">${saDetail(subs[0])}</div>
+            <div class="sa-list">${listHtml}</div>
+            <div class="card sa-detail" id="sa-detail">${saDetail((first ?? entries[0]).sa)}</div>
           </div>`;
         const detail = document.getElementById('sa-detail')!;
         subagentsPane.querySelectorAll<HTMLElement>('.sa-row').forEach(rowEl => {

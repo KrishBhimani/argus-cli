@@ -27,6 +27,11 @@ scripts in `src/scripts/`.
   `dashboard-dist` before committing.
 - Avoid em dashes / non-ASCII in strings that surface in the **terminal**
   (CLI/console) — they mojibake on the Windows console. (UI text is fine.)
+- **`public/styles/global.css` is the single served stylesheet.** The layout
+  links `/styles/global.css`, which Astro copies verbatim from `public/`. There
+  is no `src/styles/global.css` and no src→public sync step — edit `public/`
+  directly. (A stale `src/` copy silently diverged once and shipped an unstyled
+  swimlane; don't reintroduce it.)
 - **The workflow swimlane is hand-built DOM, not ECharts.** `swimlane.ts` renders
   CSS-grid rows with absolutely-positioned bars (real hover/focus, text selection,
   no bundle growth); ECharts stays for the cost rollup only. This holds up to
