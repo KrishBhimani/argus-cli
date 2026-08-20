@@ -18,3 +18,6 @@ window.matchMedia ??= ((q: string) => ({
 })) as unknown as typeof window.matchMedia;
 
 window.scrollTo = (() => {}) as typeof window.scrollTo;
+
+class P2D { moveTo() {} lineTo() {} rect() {} arc() {} closePath() {} addPath() {} }
+(globalThis as unknown as { Path2D: unknown }).Path2D = P2D;
