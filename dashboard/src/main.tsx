@@ -1,9 +1,17 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { RouterProvider } from '@tanstack/react-router';
+import { QueryClientProvider } from '@tanstack/react-query';
 import './styles.css';
+import { router } from './app/router';
+import { queryClient } from './app/queryClient';
 
 export function App() {
-  return <div className="p-4 font-semibold tracking-[0.14em] text-xs">ARGUS</div>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  );
 }
 
 const el = document.getElementById('root');
