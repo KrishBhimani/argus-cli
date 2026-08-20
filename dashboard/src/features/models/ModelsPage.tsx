@@ -1,12 +1,58 @@
+import { useMemo, useState } from 'react';
 import { TopBar, Page } from '@/app/shell/TopBar';
-import { EmptyState } from '@/components/ui/EmptyState';
+import { Seg } from '@/components/ui/Seg';
+import { Panel } from '@/components/ui/Panel';
+import { ErrorPanel } from '@/components/ui/ErrorPanel';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { Bars } from '@/components/charts/Bars';
+import { AreaLine } from '@/components/charts/AreaLine';
+import { ChartTable } from '@/components/charts/ChartTable';
+import { WINDOWS, type Window } from '@/lib/api/client';
+import { useOverview, useTrends } from '@/lib/api/hooks';
+import { perMTokens } from '@/lib/analysis/rollups';
+import { shareOfTotal, trendsToSeries } from '@/lib/analysis/series';
+import { num, usd } from '@/lib/format/format';
 
 export default function ModelsPage() {
+  const [w, setW] = useState<Window>('30d');
+  const ov = useOverview(w);
+  const tr = useTrends('week', 'model');
+  const rows = useMemo(
+    () =>
+      Object.keys({ ...ov.data?.tokens_by_model, ...ov.data?.cost_by_model })
+        .map((m) => ({ model: m, tokens: ov.data?.tokens_by_model[m] ?? 0, cost: ov.data?.cost_by_model[m] ?? 0 }))
+        .sort((a, b) => b.cost - a.cost),
+    [ov.data],
+  );
+  const share = useMemo(() => {
+    if (!tr.data) return null;
+    const s = trendsToSeries(tr.data.points.slice(-26), 'tokens');
+    const norm = shareOfTotal(s.rows);
+    return { labels: s.labels, series: s.names.map((n, i) => ({ name: n, values: norm[i] })) };
+  }, [tr.data]);
+  const totalCost = rows.reduce((a, x) => a + x.cost, 0);
+
+  if (ov.error) return (<><TopBar crumbs={['Analyze', 'Models']} /><Page><ErrorPanel error={ov.error} /></Page></>);
   return (
     <>
-      <TopBar crumbs={['Analyze', 'Models']} />
+      <TopBar crumbs={['Analyze', 'Models']}><Seg options={WINDOWS.map((v) => ({ value: v, label: v }))} value={w} onChange={setW} /></TopBar>
       <Page>
-        <EmptyState title="Models" />
+        <div className="grid grid-cols-2 gap-3">
+          <Panel title="Tokens by model">{ov.data ? (rows.length ? <Bars rows={rows.map((r) => ({ name: r.model, value: r.tokens }))} /> : <div className="text-ink-2 text-center py-6">No data.</div>) : <Skeleton w="100%" h="160px" />}</Panel>
+          <Panel title="Estimated cost by model">{ov.data ? (rows.length ? <Bars rows={rows.map((r) => ({ name: r.model, value: r.cost }))} format={usd} color="#285a95" /> : <div className="text-ink-2 text-center py-6">No data.</div>) : <Skeleton w="100%" h="160px" />}</Panel>
+        </div>
+        <Panel title="Price efficiency" sub="$ per million tokens, as experienced in this window">
+          {rows.some((r) => r.tokens > 0) ? <Bars rows={rows.filter((r) => r.tokens > 0).map((r) => ({ name: r.model, value: perMTokens(r.cost, r.tokens) ?? 0 }))} format={usd} color="#3173c4" /> : <div className="text-ink-2 text-center py-6">No data.</div>}
+        </Panel>
+        <Panel title="Model share over time" sub="share of fresh + output tokens, by week">
+          {share ? (share.series.length ? <AreaLine labels={share.labels} series={share.series} stacked share /> : <div className="text-ink-2 text-center py-6">No data.</div>) : <Skeleton w="100%" h="220px" />}
+        </Panel>
+        <Panel title="Per-model details" padded={false}>
+          <ChartTable
+            columns={['model', 'tokens', 'est. cost', '$ / M tokens', 'share of cost']}
+            rows={rows.map((r) => { const pm = perMTokens(r.cost, r.tokens); return [r.model, num(r.tokens), usd(r.cost), pm == null ? '—' : usd(pm), totalCost ? `${Math.round((r.cost / totalCost) * 100)}%` : '—']; })}
+          />
+        </Panel>
       </Page>
     </>
   );
