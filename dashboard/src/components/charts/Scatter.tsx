@@ -32,8 +32,8 @@ export function Scatter({ points, xLabel, yLabel, logX = false, logY = false, fo
       hooks: { setCursor: [(u) => { const i = u.cursor.idx; setTip(i == null ? null : sorted[i]?.label ?? null); }] },
       scales: { x: { time: false, distr: logX ? 3 : 1 }, y: { distr: logY ? 3 : 1 } },
       axes: [
-        { ...AXIS, label: xLabel, labelFont: '10px IBM Plex Sans, sans-serif', labelSize: 14, values: (_u, v) => v.map(formatX) },
-        { ...AXIS, size: 52, label: yLabel, labelFont: '10px IBM Plex Sans, sans-serif', labelSize: 14, values: (_u, v) => v.map(formatY) },
+        { ...AXIS, label: xLabel, labelFont: '10px IBM Plex Sans, sans-serif', labelSize: 14, values: (_u, v) => v.map((x) => (x == null ? '' : formatX(x))) },
+        { ...AXIS, size: 52, label: yLabel, labelFont: '10px IBM Plex Sans, sans-serif', labelSize: 14, values: (_u, v) => v.map((x) => (x == null ? '' : formatY(x))) },
       ],
       series: [
         {},

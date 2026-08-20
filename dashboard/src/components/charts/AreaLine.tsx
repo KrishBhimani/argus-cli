@@ -24,8 +24,8 @@ export function AreaLine({ labels, series, stacked = false, fill = true, share =
       padding: [8, 12, 0, 0],
       scales: { x: { time: false }, y: share ? { range: [0, 1] } : {} },
       axes: [
-        { ...AXIS, values: (_u, vals) => vals.map((v) => labels[v] ?? '') },
-        { ...AXIS, size: 52, values: (_u, vals) => vals.map((v) => (share ? `${Math.round(v * 100)}%` : format(v))) },
+        { ...AXIS, values: (_u, vals) => vals.map((v) => (v == null ? '' : labels[v] ?? '')) },
+        { ...AXIS, size: 52, values: (_u, vals) => vals.map((v) => (v == null ? '' : share ? `${Math.round(v * 100)}%` : format(v))) },
       ],
       series: [
         {},
