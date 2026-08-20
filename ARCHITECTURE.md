@@ -26,8 +26,9 @@ No network calls (except optional `argus pricing refresh`). No
 telemetry. No LLM calls. Everything stays on your machine.
 
 The backend is Python (≥3.11, FastAPI + uvicorn + pydantic + watchdog
-+ stdlib sqlite3 + typer). The dashboard is Astro + ECharts, statically
-built. Both ship together in the `argus-code` wheel on PyPI.
++ stdlib sqlite3 + typer). The dashboard is a Vite + React SPA (TanStack
+Router/Query/Table, uPlot + SVG charts, Tailwind tokens), statically built.
+Both ship together in the `argus-code` wheel on PyPI.
 
 ## The data layer
 
@@ -119,12 +120,19 @@ python/argus/server/api.py         /api/overview, /api/sessions, /api/tools, …
 python/argus/store/repository.py   parameterized SQL queries
         │
         ▼
-dashboard-dist/                    static HTML+JS bundled from dashboard/src/ (Astro + ECharts)
+dashboard-dist/                    static SPA bundled from dashboard/src/ (Vite + React)
 ```
 
 The dashboard is **statically built**. No server-side rendering, no
-Node in the browser. Pages just `fetch('/api/...')` and render with
-ECharts.
+Node at runtime. Pages fetch `/api/...` through a typed, Zod-validated
+client (`dashboard/src/lib/api/`) via TanStack Query and render with uPlot
+(time series, scatter) and hand-rolled SVG (bars, meters, heatmaps, the
+session minimap). Derived analyses (prior-window deltas, per-project
+rollups, weekday x hour, tool calls per day) are pure functions in
+`dashboard/src/lib/analysis/`, computed client-side from existing endpoints;
+each carries a `// candidate-endpoint:` note where a server aggregate would
+scale better. Deep links such as `/sessions/<id>` are served by the
+`index.html` fallback in `server/app.py` and resolved by the client router.
 
 ## Detection (alerts)
 
@@ -223,10 +231,11 @@ A few patterns to absorb before adding code:
   `ON CONFLICT(id) DO UPDATE`. Re-ingesting a file from offset 0 is
   safe — useful for backfilling derived data after a schema change.
 
-- **HTML-escape every user-controlled string.** Anything from the
-  JSONL that ends up in `innerHTML` goes through `escapeHtml()` from
-  `dashboard/src/scripts/format.ts`. The only HTML allowed through
-  raw is `<mark>` from FTS5 snippets, via `safeSnippet()`.
+- **Never write raw HTML in the dashboard.** React renders every
+  JSONL-derived string as a text node; `dangerouslySetInnerHTML` and
+  `innerHTML` are forbidden (`tests/dashboard/test_no_raw_html.py`). FTS5
+  `<mark>` snippets are split into text runs by
+  `dashboard/src/features/search/cleanSnippet.ts`.
 
 - **CSRF Origin check.** All non-GET `/api/*` routes verify the
   `Origin` header is loopback. Implemented as FastAPI middleware in
@@ -266,10 +275,15 @@ python/argus/
 
 dashboard/
   src/
-    layouts/Default.astro   nav, footer, font, styles
-    pages/                  one .astro per route
-    scripts/                api client, charts, formatters
-    styles/global.css       single theme stylesheet
+    app/                    router, query client, shell (sidebar, top bar, Ctrl+K)
+    routes/                 TanStack file routes (one per page + legacy redirects)
+    features/<page>/        page components and page-specific hooks
+    components/ui/          Panel, Tile, Pill, Chip, Seg, Button, DataTable, ...
+    components/charts/      uPlot wrappers + SVG charts (rules in README.md)
+    lib/api/                Zod schemas, typed client, React Query hooks, fixtures
+    lib/analysis/           pure derived analyses (unit-tested)
+    lib/format/             number / date formatters
+    styles.css              Tailwind v4 tokens (@theme) + base rules
 dashboard-dist/             built dashboard, shipped in the wheel as data
 
 pricing/                    bundled LiteLLM price tables (shipped in wheel as data)
@@ -296,12 +310,12 @@ tests/                      pytest suite, mirrors python/argus/ layout
 
 | Want to… | Touch these |
 |---|---|
-| Add a new dashboard page | `dashboard/src/pages/<name>.astro`, add nav link in `dashboard/src/layouts/Default.astro` |
+| Add a new dashboard page | `dashboard/src/routes/<name>.tsx` + `dashboard/src/features/<name>/<Name>Page.tsx`, add it to `GROUPS` in `dashboard/src/app/shell/Sidebar.tsx` and `PAGES` in `CommandPalette.tsx` |
 | Add a new API endpoint | `python/argus/server/api.py`, add a `repo.<method_name>()` in `python/argus/store/repository.py` |
 | Add a new SQL table or column | New `MIGRATION_N+1` in `python/argus/store/migrations/inline.py`, bump schema check in `db.py`, add `repo` method, add pydantic model in `python/argus/schema/types.py` |
 | Parse a new JSONL field | `python/argus/adapters/claude_code/schemas.py` (pydantic), wire into `pipeline.py` |
 | Tweak cost computation | `python/argus/pricing/compute.py`, then re-ingest to recompute via a backfill |
-| Add a new chart | `dashboard/src/scripts/charts.ts` (theme is shared) |
+| Add a new chart | `dashboard/src/components/charts/` (read its `README.md` first; series colours in `uplotTheme.ts`) |
 | Add a new adapter (Codex, OpenClaw, Hermes, …) | New folder `python/argus/adapters/<agent>/` + `@register class` in `adapter.py`. No edits to CLI / watcher / pipeline / server. |
 | Add an alert detector | New file in `python/argus/detectors/` with a `@register` class whose pure `detect()` returns `Finding`s, plus the side-effect import in `detectors/__init__.py`. The scheduler picks it up automatically. |
 | Change the bundled scaffold template | Edit files under `templates/default/`; they're force-included into the wheel. New top-level dirs need a `force-include` entry in `pyproject.toml`. |

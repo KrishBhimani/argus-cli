@@ -41,6 +41,9 @@ this doc is the binding conventions.
   thread is undefined behaviour — it segfaulted CI (exit 139) rather than
   failing a test.
 - **CLI tests** use `typer.testing.CliRunner` against `from argus.cli import app`.
+- **Dashboard source guards** live in `tests/dashboard/` and scan
+  `dashboard/src` as text (`test_no_raw_html.py` forbids raw-HTML sinks). The
+  dashboard's own unit/e2e tests are `npm test` / `npm run e2e` in `dashboard/`.
 
 ## Verification
 

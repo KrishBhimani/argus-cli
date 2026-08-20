@@ -20,6 +20,11 @@ the `/api/...` routes over the repository.
   `SafeStaticFiles`, whose `lookup_path` swallows `OSError` and returns
   `("", None)` — needed because a `:` in a URL segment makes Starlette raise on
   Windows. Keep that subclass; don't mount plain `StaticFiles`.
+- **SPA fallback.** The dashboard is client-routed. A `GET` that is not
+  `/api/*`, whose last path segment has no extension, and misses the static
+  mount returns `dashboard-dist/index.html` (200) via the 404 exception handler
+  registered next to the mount. Asset and API misses stay 404; no fallback when
+  the dashboard dir is absent. Covered by `tests/server/test_spa_fallback.py`.
 - **Clean shutdown.** `serve_blocking` pre-installs SIGINT/SIGTERM handlers that
   flip uvicorn's `should_exit` (then `force_exit`) before `server.run()`, and
   restores the previous handlers in a `finally`. This is what makes Ctrl+C exit
@@ -42,5 +47,5 @@ the `/api/...` routes over the repository.
 
 ## Verification
 
-`uv run pytest tests/server` — covers route ordering, `SafeStaticFiles`, and the
-sub-agent URL (no 500).
+`uv run pytest tests/server` — covers route ordering, `SafeStaticFiles`, the SPA
+fallback, and the sub-agent URL (no 500).

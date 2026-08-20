@@ -16,7 +16,7 @@
 
 Argus is a **local-first** analytics dashboard for Claude Code (and other coding
 agents). A watcher ingests Claude Code's `.jsonl` session transcripts into a local
-SQLite archive (`~/.argus/argus.db`); a FastAPI server serves a static Astro
+SQLite archive (`~/.argus/argus.db`); a FastAPI server serves a static React
 dashboard at `http://localhost:4242`. No network, no telemetry, no LLM calls
 (except opt-in `argus pricing refresh`). Backend + dashboard ship together in the
 `argus-code` wheel on PyPI.
@@ -92,8 +92,9 @@ Global engineering rules (binding):
 
 ## Verification
 
-- Backend: `uv run pytest` (must be green; ~290 tests, ~25s on Windows).
-- Dashboard: `cd dashboard && npm run build` (must succeed).
+- Backend: `uv run pytest` (must be green; ~480 tests, ~35s on Windows).
+- Dashboard: `cd dashboard && npm test && npm run build && npm run size` (all must
+  succeed); `npm run e2e` before a release.
 - Built form smoke test: see `CONTRIBUTING.md` "Running the built form".
 
 ## User Preferences
@@ -115,5 +116,5 @@ Global engineering rules (binding):
   - `python/argus/adapters/AGENTS.md` — Claude Code adapter and transcript-segment
     extraction; sub-agent file layout.
   - `python/argus/server/AGENTS.md` — FastAPI routes, static serving, clean shutdown.
-- `dashboard/AGENTS.md` — Astro dashboard and the `dashboard-dist` ship chain.
+- `dashboard/AGENTS.md` — React SPA dashboard and the `dashboard-dist` ship chain.
 - `tests/AGENTS.md` — pytest conventions and platform quirks.

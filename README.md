@@ -176,8 +176,9 @@ For vulnerability reports, see [SECURITY.md](./SECURITY.md).
    one over assistant text + thinking blocks + user content + tool
    output (~30–60 MB for hundreds of sessions). Indexing happens
    incrementally during the normal ingest tick.
-5. **Dashboard.** Astro 5 + ECharts, statically built, served by the
-   FastAPI app (uvicorn). No server-side rendering, no Node code in the browser.
+5. **Dashboard.** Vite + React SPA (uPlot + SVG charts), statically built,
+   served by the FastAPI app (uvicorn). No server-side rendering, no Node at
+   runtime, no network beyond `/api/*`.
 6. **Detection (alerts).** A lightweight scheduler thread runs registered
    *detectors* on a fixed cadence. Each detector reads the DB and returns
    findings; the scheduler is the sole writer, upserting them into an
@@ -236,7 +237,7 @@ uv run pytest         # ~380 tests, ~30s
 uv run argus start    # dev — runs directly from source
 ```
 
-The dashboard is an Astro project under `dashboard/` and still builds via
+The dashboard is a Vite + React project under `dashboard/` and builds via
 `npm` at release time only. End users never touch npm.
 
 Source layout:
@@ -253,8 +254,8 @@ python/argus/         Python ingest, store, server, CLI
   scaffold/           `argus claude` template storage / init / snapshot
   pricing/            LiteLLM-derived price table + cost compute
   schema/             pydantic data models
-dashboard/            Astro source
-dashboard-dist/       Astro build output (shipped in wheel as data)
+dashboard/            React SPA source (Vite)
+dashboard-dist/       Vite build output (shipped in wheel as data)
 pricing/              Bundled pricing JSON (shipped in wheel as data)
 templates/            Bundled .claude/ scaffolding templates (shipped in wheel as data)
 tests/                pytest suite, mirrors python/argus/ layout
