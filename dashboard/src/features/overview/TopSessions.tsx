@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import type { Overview } from '@/lib/api/client';
 import { Panel } from '@/components/ui/Panel';
 import { shortDate, shortPath, tok, usd } from '@/lib/format/format';
@@ -7,6 +7,8 @@ const HEAD = ['STARTED', 'PROJECT', 'MODEL', 'TOKENS', 'EST. COST'];
 
 export function TopSessions({ rows }: { rows: Overview['top_sessions'] }) {
   const max = Math.max(1, ...rows.map((r) => r.window_tokens));
+  const nav = useNavigate();
+  const open = (id: string) => nav({ to: '/sessions/$id', params: { id }, search: { tab: 'overview' } });
   return (
     <Panel title="Top sessions" sub="by tokens in window" right={<Link to="/sessions" className="text-[11px]">All sessions →</Link>} padded={false}>
       <table className="w-full border-collapse">
@@ -19,9 +21,9 @@ export function TopSessions({ rows }: { rows: Overview['top_sessions'] }) {
         </thead>
         <tbody>
           {rows.slice(0, 8).map((s) => (
-            <tr key={s.id} className="hover:bg-bg-2">
+            <tr key={s.id} className="hover:bg-bg-2 cursor-pointer" onClick={() => open(s.id)} onKeyDown={(e) => e.key === 'Enter' && open(s.id)} tabIndex={0}>
               <td className="px-3 h-[34px] border-b border-line font-mono text-xs whitespace-nowrap">
-                <Link to="/sessions/$id" params={{ id: s.id }} search={{ tab: 'overview' }} className="text-ink-0">{shortDate(s.started_at)}</Link>
+                <span className="text-ink-0">{shortDate(s.started_at)}</span>
                 {s.days_active > 1 && <span className="text-ink-2 text-[10px] ml-1">+{s.days_active - 1}d</span>}
               </td>
               <td className="px-3 border-b border-line font-mono text-xs text-ink-1 truncate max-w-[360px]" title={s.project_path}>{shortPath(s.project_path)}</td>
