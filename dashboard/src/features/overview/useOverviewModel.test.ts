@@ -18,7 +18,7 @@ const ov = (byDay: Record<string, number>, costByDay: Record<string, number>, se
 it('computes deltas against the prior equal window from the wider response', () => {
   const cur = ov({ '2026-08-21': 10 }, { '2026-08-21': 1 }, 2);
   const wider = ov({ '2026-08-21': 10, '2026-08-20': 5 }, { '2026-08-21': 1, '2026-08-20': 2 }, 3);
-  const t = overviewTiles(cur, wider, '24h', today, { total_calls: 10, total_errors: 1 }, { total_calls: 30, total_errors: 2 });
+  const t = overviewTiles(cur, wider, '24h', today, { total_calls: 10, total_errors: 1 }, { total_calls: 30, total_errors: 2 }, 1);
   expect(t.tokens).toEqual({ abs: 5, pct: 1, dir: 'up' });
   expect(t.cost?.dir).toBe('down');
   expect(t.sessions).toEqual({ abs: 1, pct: 1, dir: 'up' });
@@ -27,5 +27,5 @@ it('computes deltas against the prior equal window from the wider response', () 
 
 it('returns null deltas for the all window', () => {
   const cur = ov({ '2026-08-21': 10 }, {}, 1);
-  expect(overviewTiles(cur, cur, 'all', today, undefined, undefined)).toEqual({ tokens: null, cost: null, sessions: null, errorRate: null });
+  expect(overviewTiles(cur, cur, 'all', today, undefined, undefined, null)).toEqual({ tokens: null, cost: null, sessions: null, errorRate: null });
 });

@@ -2,13 +2,13 @@ import { Icon } from './Icon';
 import { deltaTone, type Delta } from '@/lib/analysis/deltas';
 import { pct } from '@/lib/format/format';
 
-export function Tile({ label, value, delta, upIsBad = false, sub, note, tone = 'default' }: {
-  label: string; value: string; delta?: Delta | null; upIsBad?: boolean; sub?: string; note?: string; tone?: 'default' | 'crit';
+export function Tile({ label, value, delta, upIsBad = false, sub, note, tone = 'default', fmt }: {
+  label: string; value: string; delta?: Delta | null; upIsBad?: boolean; sub?: string; note?: string; tone?: 'default' | 'crit'; fmt?: (d: Delta) => string;
 }) {
   const t = delta ? deltaTone(delta, upIsBad) : 'neutral';
   const cls = t === 'bad' ? 'text-crit-ink' : t === 'ok' ? 'text-good' : 'text-ink-1';
   const sign = delta && delta.abs >= 0 ? '+' : '−';
-  const text = delta ? (delta.pct != null ? `${sign}${pct(Math.abs(delta.pct), 0)}` : `${sign}${Math.abs(delta.abs)}`) : '';
+  const text = delta ? (fmt ? fmt(delta) : delta.pct != null ? `${sign}${pct(Math.abs(delta.pct), 0)}` : `${sign}${Math.abs(delta.abs)}`) : '';
   return (
     <div className={`bg-bg-1 border rounded-md px-4 py-3.5 flex flex-col gap-1.5 min-w-0 ${tone === 'crit' ? 'border-crit/50' : 'border-line'}`}>
       <span className="text-[11px] text-ink-1 font-medium">{label}</span>

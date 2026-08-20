@@ -74,7 +74,7 @@ export default function OverviewPage() {
           <Tile label="Tokens" value={c ? tok(c.total_tokens) : '—'} delta={m.tiles.tokens} sub="vs prior window" note={c ? `${tok(avg)} / session` : undefined} />
           <Tile label="Estimated cost" value={c ? usd(c.total_cost_usd) : '—'} delta={m.tiles.cost} upIsBad sub="vs prior window" note={c && days ? `${usd(c.total_cost_usd / days)} / day` : undefined} />
           <Tile label="Sessions" value={c ? num(c.session_count) : '—'} delta={m.tiles.sessions} sub="vs prior window" />
-          <Tile label="Tool error rate" value={errRate == null ? '—' : pct(errRate)} delta={m.tiles.errorRate} upIsBad sub={m.tools ? `${num(m.tools.total_errors)} of ${num(m.tools.total_calls)} calls` : undefined} />
+          <Tile label="Tool error rate" value={errRate == null ? '—' : pct(errRate)} delta={m.tiles.errorRate} upIsBad fmt={(d) => `${d.abs >= 0 ? '+' : '−'}${(Math.abs(d.abs) * 100).toFixed(1)} pt`} sub={m.tools ? `${num(m.tools.total_errors)} of ${num(m.tools.total_calls)} calls` : undefined} />
         </div>
 
         <AttentionStrip />
