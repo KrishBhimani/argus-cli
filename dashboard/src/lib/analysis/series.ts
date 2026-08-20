@@ -2,7 +2,7 @@ import type { TrendsResponse } from '@/lib/api/client';
 
 const MAX = 5;
 
-/** Aligned rows per group name (first-appearance order), top 5 by total + 'Other'. */
+/** Aligned rows per group name, top 5 by total (desc) + 'Other'. */
 export function trendsToSeries(points: TrendsResponse['points'], field: 'tokens' | 'cost') {
   const labels = points.map((p) => p.bucket);
   const totals = new Map<string, number>();
@@ -12,8 +12,9 @@ export function trendsToSeries(points: TrendsResponse['points'], field: 'tokens'
       if (!totals.has(k)) order.push(k);
       totals.set(k, (totals.get(k) ?? 0) + g[field]);
     }
-  const names = order.slice(0, MAX);
-  const other = order.slice(MAX);
+  const ranked = [...order].sort((a, b) => (totals.get(b) ?? 0) - (totals.get(a) ?? 0));
+  const names = ranked.slice(0, MAX);
+  const other = ranked.slice(MAX);
   const rows = names.map((n) => points.map((p) => p.groups[n]?.[field] ?? 0));
   if (other.length) {
     names.push('Other');

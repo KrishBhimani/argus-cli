@@ -24,5 +24,5 @@ export function TopBar({ crumbs, children }: { crumbs: Crumb[]; children?: React
 }
 
 export const Page = ({ children, row = false }: { children: ReactNode; row?: boolean }) => (
-  <div className={`p-5 flex ${row ? 'flex-row' : 'flex-col'} gap-4 flex-1 min-h-0 overflow-auto`}>{children}</div>
+  <div className={`p-5 flex ${row ? 'flex-row' : 'flex-col'} gap-4 flex-1 min-h-0 overflow-auto ${row ? '' : '[&>*]:shrink-0'}`}>{children}</div>
 );
