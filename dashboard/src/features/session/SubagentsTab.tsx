@@ -9,6 +9,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Seg } from '@/components/ui/Seg';
 import { Icon } from '@/components/ui/Icon';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { CopyId } from '@/components/ui/CopyId';
 import { Bars } from '@/components/charts/Bars';
 import { Minimap } from '@/components/charts/Minimap';
 import { Legend } from '@/components/charts/Legend';
@@ -58,7 +59,7 @@ function SubagentDetail({ sa, index }: { sa: SubagentSummary; index: number }) {
         <span className="font-mono text-ink-2">#{index + 1}</span>
         <Pill kind={sa.status === 'ok' ? 'good' : 'crit'}>{sa.status === 'ok' ? 'OK' : `${sa.errors} ERR`}</Pill>
         <span className="font-mono text-[11px] text-ink-1 bg-bg-3 px-1.5 rounded-sm">{sa.model}</span>
-        <span className="font-mono text-[11px] text-ink-2">{sa.id.split(':').pop()?.slice(0, 8)}</span>
+        <CopyId value={sa.id} />
         <Link to="/sessions/$id" params={{ id: sa.id }} search={{ tab: 'timeline' }} className="ml-auto text-[11px]">Open as its own session →</Link>
       </div>
       <div className="grid grid-cols-5 gap-3">

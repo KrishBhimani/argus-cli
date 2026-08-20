@@ -7,6 +7,7 @@ import { Pill } from '@/components/ui/Pill';
 import { Panel } from '@/components/ui/Panel';
 import { ErrorPanel } from '@/components/ui/ErrorPanel';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { CopyId } from '@/components/ui/CopyId';
 import { Minimap } from '@/components/charts/Minimap';
 import { AreaLine } from '@/components/charts/AreaLine';
 import { Legend } from '@/components/charts/Legend';
@@ -49,7 +50,7 @@ export default function SessionPage() {
   return (
     <>
       <TopBar crumbs={[...crumbs]}>
-        <span className="font-mono text-[11px] text-ink-1 bg-bg-3 px-1.5 rounded-sm">{id.split(':').pop()?.slice(0, 8)}</span>
+        <CopyId value={id} />
         <Seg
           options={[{ value: 'overview', label: 'Overview' }, { value: 'timeline', label: 'Timeline' }, { value: 'subagents', label: `Sub-agents · ${subs.data?.length ?? 0}` }]}
           value={tab}

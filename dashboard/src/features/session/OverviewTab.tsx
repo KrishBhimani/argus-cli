@@ -2,6 +2,7 @@ import type { Session, TimelineTurn } from '@/lib/api/client';
 import { Panel } from '@/components/ui/Panel';
 import { Bars } from '@/components/charts/Bars';
 import { fmtLocalDateTime, num } from '@/lib/format/format';
+import { CopyId } from '@/components/ui/CopyId';
 import { cacheRatio, toolMix } from './model';
 
 export function OverviewTab({ session: s, turns }: { session: Session; turns: TimelineTurn[] }) {
@@ -17,7 +18,6 @@ export function OverviewTab({ session: s, turns }: { session: Session; turns: Ti
     ['Cache writes', `${num(s.total_cache_write_tokens)} tokens`],
     ['Cache reads', `${num(s.total_cache_read_tokens)} tokens`],
     ['Pricing version', s.pricing_table_version],
-    ['Session id', s.id],
   ];
   const mix = toolMix(turns);
   return (
@@ -30,6 +30,10 @@ export function OverviewTab({ session: s, turns }: { session: Session; turns: Ti
               <dd className="px-3.5 py-2 border-b border-line font-mono m-0 break-all">{v}</dd>
             </div>
           ))}
+          <div className="contents">
+            <dt className="px-3.5 py-2 border-b border-line text-ink-1">Session id</dt>
+            <dd className="px-3.5 py-2 border-b border-line font-mono m-0 break-all flex items-center gap-2"><span>{s.id}</span><CopyId value={s.id} chars={0} /></dd>
+          </div>
         </dl>
       </Panel>
       <div className="flex flex-col gap-3">
