@@ -12,12 +12,12 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string, schema: z.ZodType<T>): Promise<T> {
+async function get<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
   const r = await fetch(path, { headers: { Accept: 'application/json' } });
   if (!r.ok) throw new ApiError(r.status, `${path} → ${r.status}`);
   return schema.parse(await r.json());
 }
-async function post<T>(path: string, schema: z.ZodType<T>): Promise<T> {
+async function post<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
   const r = await fetch(path, { method: 'POST', headers: { Accept: 'application/json' } });
   if (!r.ok) throw new ApiError(r.status, `${path} → ${r.status}`);
   return schema.parse(await r.json());
