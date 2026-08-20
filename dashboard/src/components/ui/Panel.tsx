@@ -7,8 +7,8 @@ export function Panel({ title, sub, right, children, className = '', padded = tr
     <section className={`bg-bg-1 border border-line rounded-md flex flex-col overflow-hidden min-w-0 ${className}`}>
       {title && (
         <header className="flex items-center gap-2.5 h-9 px-3.5 border-b border-line shrink-0">
-          <h3 className="m-0 text-xs font-semibold text-ink-0">{title}</h3>
-          {sub && <span className="text-[11px] text-ink-2 font-mono">{sub}</span>}
+          <h3 className="m-0 text-xs font-semibold text-ink-0 whitespace-nowrap">{title}</h3>
+          {sub && <span className="text-[11px] text-ink-2 font-mono truncate">{sub}</span>}
           {right && <div className="ml-auto flex items-center gap-1.5">{right}</div>}
         </header>
       )}

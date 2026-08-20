@@ -133,6 +133,11 @@ export const SubagentSummary = z
     errors: z.number(),
     tokens: z.object({ fresh_input: z.number(), output: z.number(), cache_read: z.number(), cache_write: z.number() }),
     tools: z.array(z.object({ name: z.string(), count: z.number(), errors: z.number() })),
+    tool_calls: z.number().optional(),
+    total_tokens: z.number().optional(),
+    cost_usd: z.number().optional(),
+    duration_sec: z.number().nullable().optional(),
+    task_given: z.string().nullable().optional(),
   })
   .passthrough();
 export type SubagentSummary = z.infer<typeof SubagentSummary>;
