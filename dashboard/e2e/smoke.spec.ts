@@ -10,7 +10,7 @@ for (const [path, crumb] of routes) {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(path);
-    await expect(page.getByText('ARGUS')).toBeVisible();
+    await expect(page.getByText('ARGUS', { exact: true })).toBeVisible();
     await expect(page.locator('b', { hasText: crumb }).first()).toBeVisible();
     // Give queries a moment to settle so render-time errors surface.
     await page.waitForTimeout(800);
@@ -20,7 +20,7 @@ for (const [path, crumb] of routes) {
 
 test('deep link survives refresh and legacy URLs redirect', async ({ page }) => {
   await page.goto('/sessions/claude_code%3Adoes-not-exist');
-  await expect(page.getByText('ARGUS')).toBeVisible(); // served index.html, not a 404 page
+  await expect(page.getByText('ARGUS', { exact: true })).toBeVisible(); // served index.html, not a 404 page
   await page.goto('/prompts');
   await expect(page).toHaveURL(/\/search$/);
   await page.goto('/session?id=claude_code%3Aabc');
