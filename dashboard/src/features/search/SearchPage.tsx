@@ -82,7 +82,7 @@ export default function SearchPage() {
             </span>
           )}
         </div>
-        <Panel padded={false} className="flex-1">
+        <Panel padded={false} className="grow">
           {hits.length === 0 && <div className="text-center text-ink-2 py-10">{dq ? 'No matches.' : 'Type to search.'}</div>}
           {hits.map((h, i) => {
             const text = cleanSnippet(h.snippet || h.text);

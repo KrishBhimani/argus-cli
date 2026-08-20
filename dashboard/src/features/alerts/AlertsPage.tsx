@@ -44,7 +44,7 @@ export default function AlertsPage() {
         <Button variant="ghost" disabled={!unseenIds.size} onClick={() => unseenIds.forEach((id) => mark.mutate(id))}>Mark all seen</Button>
       </TopBar>
       <Page row>
-        <Panel padded={false} className="flex-1">
+        <Panel padded={false} className="flex-1 self-start">
           {rows.length === 0 && (
             <div className="text-center text-ink-2 py-10 flex items-center justify-center gap-2"><Pill kind="good">ALL CLEAR</Pill>nothing {f === 'all' ? 'recorded' : f}</div>
           )}

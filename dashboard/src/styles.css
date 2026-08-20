@@ -47,6 +47,15 @@
   a:hover { color: #fff; }
   .num, .font-mono { font-variant-numeric: tabular-nums; }
   :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+  /* Scrollbars: thin, rounded, recessive; thumb brightens on hover. */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--color-line-2); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-ink-2); border: 3px solid transparent; background-clip: padding-box; }
+  @supports not selector(::-webkit-scrollbar) {
+    * { scrollbar-width: thin; scrollbar-color: var(--color-line-2) transparent; }
+  }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
   }

@@ -37,13 +37,19 @@ export function OverviewTab({ session: s, turns }: { session: Session; turns: Ti
           {mix.length ? <Bars rows={mix} format={num} /> : <div className="text-ink-2 text-center py-4">No tool calls.</div>}
         </Panel>
         <Panel title="Cache ratio per turn" sub="share of each turn read from cache">
-          <div className="flex items-end gap-[2px] h-12">
-            {turns.map((t) => (
-              <div key={t.sequence} title={`#${t.sequence} · ${Math.round(cacheRatio(t) * 100)}%`} className="flex-1 bg-bg-3 relative min-w-[2px] h-full">
-                <i className="absolute bottom-0 left-0 right-0 bg-s1" style={{ height: `${cacheRatio(t) * 100}%` }} />
-              </div>
-            ))}
-          </div>
+          <svg className="block w-full" viewBox={`0 0 1000 48`} preserveAspectRatio="none" style={{ aspectRatio: '1000 / 48' }} role="img" aria-label="Cache ratio per turn">
+            {turns.map((t, i) => {
+              const bw = 1000 / Math.max(1, turns.length);
+              const r = cacheRatio(t);
+              return (
+                <g key={t.sequence}>
+                  <title>{`#${t.sequence} · ${Math.round(r * 100)}%`}</title>
+                  <rect x={i * bw} y={0} width={Math.max(0.5, bw - 0.5)} height={48} fill="#1d222c" />
+                  <rect x={i * bw} y={48 - r * 48} width={Math.max(0.5, bw - 0.5)} height={r * 48} fill="#3987e5" />
+                </g>
+              );
+            })}
+          </svg>
         </Panel>
       </div>
     </div>
