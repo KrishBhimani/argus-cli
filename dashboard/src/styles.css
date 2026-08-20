@@ -1,0 +1,53 @@
+@import 'tailwindcss';
+@import '@fontsource/ibm-plex-sans/latin-400.css';
+@import '@fontsource/ibm-plex-sans/latin-500.css';
+@import '@fontsource/ibm-plex-sans/latin-600.css';
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import '@fontsource/ibm-plex-mono/latin-500.css';
+
+@theme {
+  --color-bg-0: #0b0d11;
+  --color-bg-1: #10131a;
+  --color-bg-2: #161a22;
+  --color-bg-3: #1d222c;
+  --color-line: #232934;
+  --color-line-2: #2c3340;
+  --color-ink-0: #e8ecf1;
+  --color-ink-1: #9aa4b2;
+  --color-ink-2: #667184;
+  --color-accent: #f0883e;
+  --color-accent-ink: #ffb177;
+  --color-good: #0ca30c;
+  --color-warn: #fab219;
+  --color-crit: #d03b3b;
+  --color-crit-ink: #ff7a7a;
+  --color-s1: #3987e5;
+  --color-s2: #d95926;
+  --color-s3: #199e70;
+  --color-s4: #c98500;
+  --color-s5: #d55181;
+  --font-sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Code', Consolas, monospace;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--color-bg-0);
+    color: var(--color-ink-0);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--color-accent-ink); text-decoration: none; }
+  a:hover { color: #fff; }
+  .num, .font-mono { font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+}

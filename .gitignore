@@ -27,3 +27,8 @@ venv/
 htmlcov/
 *.egg-info/
 build/
+
+# Dashboard e2e artifacts
+dashboard/playwright-report/
+dashboard/test-results/
+dashboard/.e2e-data/
