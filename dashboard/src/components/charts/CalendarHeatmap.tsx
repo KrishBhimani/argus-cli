@@ -11,7 +11,7 @@ export function CalendarHeatmap({ byDay, days = 90, end = new Date(), className 
   const startDow = (new Date(keys[0] + 'T00:00:00').getDay() + 6) % 7; // Mon=0
   const cell = 11, gap = 2, weeks = Math.ceil((days + startDow) / 7);
   return (
-    <svg className={className} width="100%" viewBox={`0 0 ${weeks * (cell + gap) + 28} ${7 * (cell + gap) + 4}`} role="img" aria-label={`Activity, last ${days} days`}>
+    <svg className={`block w-full ${className}`} width="100%" viewBox={`0 0 ${weeks * (cell + gap) + 28} ${7 * (cell + gap) + 4}`} style={{ aspectRatio: `${weeks * (cell + gap) + 28} / ${7 * (cell + gap) + 4}` }} role="img" aria-label={`Activity, last ${days} days`}>
       {['M', 'W', 'F'].map((l, i) => (
         <text key={l} x={0} y={i * 2 * (cell + gap) + cell} fontSize={9} fill="#667184" fontFamily="var(--font-mono)">{l}</text>
       ))}

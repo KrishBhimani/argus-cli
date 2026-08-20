@@ -6,7 +6,7 @@ export function GridHeatmap({ matrix, rowLabels, colLabels, className = '' }: {
   const max = Math.max(1, ...matrix.flat());
   const cw = 16, ch = 14, gap = 2, lx = 26;
   return (
-    <svg className={className} width="100%" viewBox={`0 0 ${lx + colLabels.length * (cw + gap)} ${matrix.length * (ch + gap) + 14}`} role="img" aria-label="Sessions by weekday and hour">
+    <svg className={`block w-full ${className}`} width="100%" viewBox={`0 0 ${lx + colLabels.length * (cw + gap)} ${matrix.length * (ch + gap) + 14}`} style={{ aspectRatio: `${lx + colLabels.length * (cw + gap)} / ${matrix.length * (ch + gap) + 14}` }} role="img" aria-label="Sessions by weekday and hour">
       {rowLabels.map((l, r) => (
         <text key={l} x={0} y={r * (ch + gap) + ch - 3} fontSize={9} fill="#667184" fontFamily="var(--font-mono)">{l}</text>
       ))}

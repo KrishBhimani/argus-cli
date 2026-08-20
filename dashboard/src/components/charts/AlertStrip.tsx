@@ -6,7 +6,7 @@ export function AlertStrip({ alerts, days = 30, end = new Date(), className = ''
 }) {
   const w = 300, h = 36, e = end.getTime(), s = e - days * 86_400_000;
   return (
-    <svg className={className} width="100%" viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`Alerts, last ${days} days`}>
+    <svg className={`block w-full ${className}`} width="100%" viewBox={`0 0 ${w} ${h}`} style={{ aspectRatio: `${w} / ${h}` }} role="img" aria-label={`Alerts, last ${days} days`}>
       <line x1={0} y1={h / 2} x2={w} y2={h / 2} stroke="#232934" />
       {alerts
         .filter((a) => a.at >= s && a.at <= e)
