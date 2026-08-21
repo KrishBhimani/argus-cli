@@ -7,7 +7,7 @@ import { Panel } from '@/components/ui/Panel';
 import { ErrorPanel } from '@/components/ui/ErrorPanel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Bars } from '@/components/charts/Bars';
-import { AreaLine } from '@/components/charts/AreaLine';
+import { StackedColumns } from '@/components/charts/StackedColumns';
 import { ChartWithTable } from '@/components/charts/ChartTable';
 import { api, WINDOWS, type Window } from '@/lib/api/client';
 import { useSessions, useToolsOverview } from '@/lib/api/hooks';
@@ -15,6 +15,7 @@ import { inWindow } from '@/lib/analysis/rollups';
 import { windowDays } from '@/lib/analysis/windows';
 import { num, pct } from '@/lib/format/format';
 import { toolCallsByDay } from './toolsOverTime';
+import { toolLabel } from '@/features/session/TimelineTab';
 
 const MAX_DERIVE_SESSIONS = 60;
 
@@ -27,7 +28,10 @@ export default function ToolsPage() {
   const tls = useQueries({ queries: derive ? inW.map((s) => ({ queryKey: ['timeline', s.id], queryFn: () => api.timeline(s.id), staleTime: 5 * 60_000 })) : [] });
   const loading = tls.some((q) => q.isLoading);
   const overTime = useMemo(
-    () => toolCallsByDay(tls.map((q, i) => ({ day: inW[i]?.started_at.slice(0, 10) ?? '', turns: q.data?.turns ?? [] })).filter((x) => x.day)),
+    () => {
+      const r = toolCallsByDay(tls.flatMap((q) => q.data?.turns ?? []));
+      return { labels: r.labels, series: r.series.map((x) => ({ ...x, name: toolLabel(x.name) })) };
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [loading, inW],
   );
@@ -55,11 +59,11 @@ export default function ToolsPage() {
             />
           ) : <Skeleton w="100%" h="200px" />}
         </Panel>
-        <Panel title="Tool calls over time" sub={derive ? 'top 5 + other, derived from session timelines' : `available for windows ≤ 30 days with ≤ ${MAX_DERIVE_SESSIONS} sessions`}>
+        <Panel title="Tool calls per day" sub={derive ? 'top 5 tools + other, by the day each call happened' : `available for windows ≤ 30 days with ≤ ${MAX_DERIVE_SESSIONS} sessions`}>
           {derive ? (
             loading ? <Skeleton w="100%" h="200px" /> : overTime.labels.length ? (
               <ChartWithTable
-                chart={<AreaLine labels={overTime.labels} series={overTime.series} stacked format={num} />}
+                chart={<StackedColumns labels={overTime.labels} series={overTime.series} />}
                 table={{ columns: ['day', ...overTime.series.map((s) => s.name)], rows: overTime.labels.map((l, i) => [l, ...overTime.series.map((s) => s.values[i])]) }}
               />
             ) : <div className="text-ink-2 text-center py-6">No tool calls in window.</div>
