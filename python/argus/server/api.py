@@ -138,7 +138,7 @@ class _ReadCache:
     request key until the underlying data changes.
 
     The fingerprint is a handful of O(1)-ish SQLite lookups (row counts and
-    max rowids of the tables those endpoints read). Ingest appends rows and
+    max rowids of the tables those endpoints read) plus the current UTC hour. Ingest appends rows and
     upserts sessions, so any new data moves at least one component; a
     pricing refresh bumps ``computed_at``. Nothing else is read by the cached
     endpoints, so a stable fingerprint means a byte-identical answer.
@@ -159,7 +159,11 @@ class _ReadCache:
                    (SELECT COUNT(*) FROM tool_calls)
             """
         ).fetchone()
-        return tuple(row)
+        # Window cutoffs ("today", "7d", ...) are relative to *now*, so time is an
+        # input too; bucketing it to the hour bounds staleness at the window edge
+        # without defeating the cache.
+        hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+        return (*row, hour)
 
     def get(self, key: tuple[Any, ...], compute: Callable[[], Any]) -> Any:
         fp = self.fingerprint()
