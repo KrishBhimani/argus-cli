@@ -211,7 +211,7 @@ class Repository:
         turns = self.get_turns_for_session(session_id)
         call_rows = self.db.execute(
             """
-            SELECT id, turn_index, tool_name, is_error, input_size, subagent_type
+            SELECT id, turn_index, tool_name, is_error, input_size, subagent_type, timestamp
             FROM tool_calls WHERE session_id = ?
             ORDER BY turn_index, timestamp, id
             """,
@@ -240,10 +240,33 @@ class Repository:
                 ).fetchall()
                 error_text = {r["tool_use_id"]: r["text"] for r in seg_rows}
 
+        # Resumed sessions restart `sequence` in every new transcript file, so
+        # turn_index alone is ambiguous: a session resumed 15 times has 15 turns
+        # numbered 0. Attaching by turn_index multiplied every tool call by the
+        # number of resumes (78k "calls" for a session with 351). Attach each
+        # call to exactly one turn: among the turns sharing its turn_index, the
+        # latest whose timestamp is not after the call's (calls carry their
+        # assistant message's time); if none precede it, the earliest.
+        turns_by_seq: dict[int, list[int]] = {}
+        for i, t in enumerate(turns):
+            turns_by_seq.setdefault(t.sequence, []).append(i)
+        for idxs in turns_by_seq.values():
+            idxs.sort(key=lambda i: turns[i].timestamp)
+
         calls_by_turn: dict[int, list[dict[str, Any]]] = {}
         for r in call_rows:
+            cands = turns_by_seq.get(r["turn_index"])
+            if not cands:
+                continue
+            ts = r["timestamp"] or ""
+            pick = cands[0]
+            for i in cands:
+                if turns[i].timestamp <= ts:
+                    pick = i
+                else:
+                    break
             tu_id = r["id"][len(prefix):] if r["id"].startswith(prefix) else r["id"]
-            calls_by_turn.setdefault(r["turn_index"], []).append(
+            calls_by_turn.setdefault(pick, []).append(
                 {
                     "tool_name": r["tool_name"],
                     "tool_use_id": tu_id,
@@ -264,9 +287,9 @@ class Repository:
                 "cache_write_tokens": t.cache_write_tokens,
                 "output_tokens": t.output_tokens,
                 "cost_usd": t.cost_usd,
-                "tool_calls": calls_by_turn.get(t.sequence, []),
+                "tool_calls": calls_by_turn.get(i, []),
             }
-            for t in turns
+            for i, t in enumerate(turns)
         ]
 
     # ─── File offsets / parse errors ───────────────────────────────────

@@ -649,6 +649,28 @@ def test_session_timeline_nests_calls_under_turns(repo):
     assert tl[0]["fresh_input_tokens"] == 100
 
 
+def test_session_timeline_attaches_each_call_once_on_resumed_sessions(repo):
+    # Regression: a resumed session has several turns with the same `sequence`
+    # (numbering restarts per transcript file). Attaching calls by turn_index
+    # alone duplicated every call onto every same-numbered turn — the Tools page
+    # showed 78k calls for a session holding 351. Each call must land on exactly
+    # one turn: the same-sequence turn closest before it in time.
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    first = turn_factory("s1:m0", "s1", "2026-05-01T00:00:00Z")          # sequence 0, first file
+    resumed = turn_factory("s1:m0b", "s1", "2026-05-01T01:00:00Z")       # sequence 0 again, resumed file
+    repo.upsert_turn(first)
+    repo.upsert_turn(resumed)
+    repo.upsert_tool_calls([
+        _tool_call("s1", "tu_a", tool_name="Read", ts="2026-05-01T00:00:02Z"),
+        _tool_call("s1", "tu_b", tool_name="Bash", ts="2026-05-01T01:00:02Z"),
+    ])
+    tl = repo.session_timeline("s1")
+    by_ts = {t["timestamp"]: [c["tool_use_id"] for c in t["tool_calls"]] for t in tl}
+    assert by_ts["2026-05-01T00:00:00Z"] == ["tu_a"]
+    assert by_ts["2026-05-01T01:00:00Z"] == ["tu_b"]
+    assert sum(len(t["tool_calls"]) for t in tl) == repo.count_tool_calls_for_session("s1")
+
+
 def test_session_timeline_attaches_error_text_when_indexed(repo):
     _timeline_fixture(repo)
     repo.set_search_indexing_enabled(True)
