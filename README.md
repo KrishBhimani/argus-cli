@@ -1,38 +1,86 @@
 # Argus
 
-**Local-first analytics + persistent archive for Claude Code.** Argus reads
-your `~/.claude/` session logs, computes cost from a bundled pricing table,
-and serves a dashboard at `http://localhost:4242` that tells you exactly how,
-when, and how much you've been using Claude Code.
+**The observability console for Claude Code — local-first, permanent, and honest about cost.**
 
-Claude Code rotates its own session files (`cleanupPeriodDays` defaults to
-30). Once Argus ingests a session into `~/.argus/argus.db`, the row stays
-forever — so a few months in, Argus knows about sessions Claude has already
-deleted. Live tools like `ccusage` can only show what's currently on disk;
-Argus accumulates.
+[![PyPI](https://img.shields.io/pypi/v/argus-code)](https://pypi.org/project/argus-code/)
+[![Python ≥ 3.11](https://img.shields.io/badge/python-%E2%89%A5%203.11-blue)](#requirements)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-Everything stays on your machine. No telemetry, no API calls, no
-embeddings — just SQLite and a static web UI.
+Claude Code writes a detailed transcript of every session to `~/.claude/` — every turn,
+every token, every tool call, every sub-agent it spawned — and then **deletes it after
+30 days**. Argus tails those files into a SQLite archive on your machine, prices each
+turn from a bundled table, and serves a dashboard at `http://localhost:4242` that
+answers the questions the transcripts never do:
+
+- *How much am I actually spending, and is it going up?*
+- *Which sessions were expensive — and which turn made them so?*
+- *Where do my tools fail, and when did that start?*
+- *What did that sub-agent get told, and what did it do?*
+- *When do I actually work, and on what?*
+
+Nothing leaves your computer. No telemetry, no API calls, no embeddings — SQLite and
+a static web app, bound to `127.0.0.1`.
 
 ```sh
 pipx install argus-code     # or:  uv tool install argus-code
 argus start
 ```
 
-That's it. Your default browser opens to the dashboard once the first-pass
-ingest finishes (~5–10s for a typical install).
+Your browser opens once the first pass finishes (5–10 s for a typical install). From
+then on, every session you run is ingested live.
 
-## What it shows you
+---
+
+## Why it exists
+
+Tools like `ccusage` read what's on disk *right now*. Claude Code rotates its own
+logs (`cleanupPeriodDays`, default 30), so "right now" is a sliding month. Once
+Argus has ingested a session into `~/.argus/argus.db` the row stays forever — a few
+months in, Argus remembers sessions Claude has already forgotten. **It accumulates.**
+
+And because it keeps the *structure* of each session (turns, tool calls, sub-agents,
+cache hits), it can do forensics, not just totals.
+
+---
+
+## What you get
+
+The dashboard is organised by the job you came to do.
+
+### Monitor
 
 | Page | What it answers |
 |---|---|
-| **Overview** | How many tokens have I burned? How much would I have paid on the API? Where does my spend land each day? Plus a **"What needs attention"** card that surfaces detector findings (e.g. a tool whose error rate spiked this week). |
-| **Sessions** | Sortable table of every session — project, model, tokens, cost, duration. Click any row to drill in: an **Overview** tab with totals and the turns table, and a **Timeline** tab showing per-turn token burn (chart + trace feed), every tool call, and failures — with the actual error output inline when search indexing is on. |
-| **Tools** | Tool-call leaderboard (Bash vs Edit vs Read vs WebFetch…), error rates per tool, MCP server breakdown, sub-agent invocations. |
-| **Search** *(opt-in)* | Full-text search over every prompt you've typed AND every assistant response, your replies, and tool output. SQLite FTS5, sub-millisecond, no embeddings. |
-| **Trends** | Tokens and cost bucketed by day / week / month, grouped by model. |
-| **Models** | Per-model token mix and cost rollup. |
-| **Settings** | Search-indexing toggle, pricing version, parse errors, data export. |
+| **Overview** | Four tiles — tokens, estimated cost, sessions, tool error rate — each with its **change vs. the previous window**. A "Needs attention" strip that is always visible (it says *all clear* when there's nothing). Tokens per day, stackable by model. A 90-day activity heatmap and a **weekday × hour** map of when you start sessions. Top sessions in the window. |
+| **Alerts** | The inbox for detector findings, with unseen / all / severity filters and a 30-day strip. Today's detector flags any tool whose error rate doubled against its 4-week baseline; more arrive with Budgets. |
+
+### Analyze
+
+| Page | What it answers |
+|---|---|
+| **Sessions** | A virtualised, sortable grid of every session with inline token bars. Above it, a **duration × tokens scatter** (log–log, coloured by model) that makes outliers obvious, or a per-project rollup. Filter by text, project, model, window. |
+| **Session detail** | Tiles, then a **session-shape minimap** — one bar per turn, cache reads beneath fresh tokens, failing turns in red; click a bar to jump. A cumulative-cost line. A compact timeline where every row expands into its tool calls, their sizes, status and output, and error text inline. Resumed sessions are stitched into one chronological thread. |
+| **Sub-agents** | For sessions that delegated: a sticky list with an at-a-glance strip (tokens per agent, red where one failed), filter and sort, and ↑↓ stepping. Each agent's **task as given**, tools, shape and full timeline, inline. |
+| **Tools** | Leaderboard with error segments, **tool calls per day** (columns / area / table), MCP servers, sub-agent invocations by type. |
+| **Models** | Tokens and cost per model, **$ per million tokens** as you actually experienced it, and each model's share over time. |
+| **Trends** | Built around **rates, not totals**: this period vs last, a run-rate projection, tokens per session, cache-read share, unit cost — plus the by-model lines, cumulative total and a full breakdown table. |
+
+### Search *(opt-in)*
+
+Full-text search over every prompt you've typed **and** every assistant reply,
+thinking block and tool output. SQLite FTS5 — sub-millisecond, lexical,
+deterministic, offline. Off by default; see [Privacy](#privacy--security).
+
+### Govern
+
+**Settings** (indexing toggle, pricing version, export, parse errors) today;
+**Budgets** — monthly ceilings with threshold alerts — is the next slot.
+
+Every chart follows a few house rules: one axis per chart, a legend whenever there's
+more than one series, status colours always paired with an icon and a label, and a
+table view behind every chart. Tokens are exact; costs are estimates, and the UI says so.
+
+---
 
 ## CLI
 
@@ -42,7 +90,7 @@ argus                                   # top-level command group
 │                                       # watcher + ingester + dashboard server
 ├─ pricing
 │  └─ refresh                           # pull latest model prices from LiteLLM
-├─ indexing                            # (was `search` — still works, hidden alias)
+├─ indexing                             # (was `search` — still works, hidden alias)
 │  ├─ status                            # is transcript indexing on?
 │  ├─ enable                            # turn it on (next start backfills)
 │  ├─ disable                           # turn it off, keep data
@@ -63,169 +111,104 @@ argus                                   # top-level command group
 └─ wipe                                 # delete ~/.argus/ entirely
 ```
 
-Run `--help` at any level for details — `argus --help`, `argus claude --help`,
-`argus claude template --help`, `argus daemon --help`.
+`--help` works at every level.
 
-### `argus daemon` — background daemon (argusd)
+### `argus daemon` — keep ingesting when the dashboard is closed
 
-By default the watcher and the detector scheduler run *inside* `argus start` —
-close the dashboard and ingestion stops. `argusd` moves that work into a
-long-running background process so your data stays fresh and detectors keep
-running whether or not the dashboard is open. It does **not** serve the
-dashboard (port 4242 is still only bound by `argus start`).
+By default the watcher and detector scheduler run *inside* `argus start`; close it
+and ingestion stops. **argusd** moves that work into a long-running background
+process. It does not serve the dashboard — port 4242 is still only bound by
+`argus start`.
 
 ```sh
-argus daemon start      # run argusd in the background
+argus daemon start      # run argusd in the background (survives closing the terminal)
 argus daemon status     # PID + uptime
-argus daemon logs -f    # follow the log (survives rotation)
+argus daemon logs -f    # follow the log
 argus daemon stop
 ```
 
-> **Autostart at login is coming separately.** For now, start argusd yourself
-> with `argus daemon start` (it survives closing the terminal). OS-native
-> autostart (`argus install` / `argus uninstall`) lands in a follow-up.
+**Coexistence.** When argusd is running, `argus start` sees its PID file and becomes a
+read-only viewer of the database the daemon keeps fresh (the sidebar footer says
+*argusd daemon*). When it isn't, `argus start` ingests in-process exactly as before.
 
-**Coexistence.** When argusd is running, `argus start` notices its PID file and
-becomes a **read-only dashboard** — it skips its own watcher/scheduler and just
-views the database the daemon keeps fresh (the footer shows *"Powered by
-argusd"*). When argusd is **not** running, `argus start` ingests in-process
-exactly as before, so users who never touch the daemon see no change.
+**Living with it.** Idle cost is negligible: the watcher is event-driven and the
+scheduler wakes every 10 minutes — expect ~40–70 MB RAM and no idle CPU. Logs rotate
+at ~1 MB × 3 in `~/.argus/argusd.log`. Things to know:
 
-> **Known limitation (v1):** if argusd dies while a read-only dashboard is open,
-> the footer keeps showing *"Powered by argusd"* and ingestion pauses until you
-> restart the dashboard (which then resumes ingesting in-process). The dashboard
-> does not re-check daemon liveness on every poll.
+- **Restart after upgrading** (`argus daemon restart`) — a running daemon holds the old code.
+- **No auto-restart yet.** A crashed daemon stays down until you start it again; the stale PID file is cleaned up. OS-native autostart (`argus install`) is a follow-up.
+- **If argusd dies while a read-only dashboard is open**, the footer keeps saying *argusd* and ingestion pauses until you restart the dashboard, which then resumes in-process.
+- **Windows `stop` is a hard kill** — safe (no critical in-memory state), but no `argusd stopped.` line lands in the log.
+- **Toggling search:** the dashboard's *Enable indexing* button indexes immediately; the CLI `argus indexing enable` flips the flag and backfills on the next `argus start` / `argus daemon restart`.
 
-**Running it long-term.** argusd is designed to stay up. Its idle cost is
-negligible — the watcher is event-driven (sleeps until a `~/.claude` file
-changes) and the detector scheduler wakes once every 10 minutes; expect ~40–70
-MB RAM and effectively no idle CPU. The log is capped at ~4 MB (1 MB × 3
-rotations). A few habits worth knowing:
+### `argus claude` — scaffold good agent config
 
-- **Restart after upgrading argus.** A running daemon holds the old code in
-  memory — run `argus daemon restart` after `uv sync` / `pip install -U` to pick
-  up changes.
-- **No auto-restart yet.** A daemon started with `argus daemon start` that
-  crashes stays down until you start it again (the stale PID file is cleaned up
-  automatically). OS-supervised restart arrives with autostart in a follow-up.
-- **Windows stop is a hard kill.** `argus daemon stop` terminates the process
-  directly on Windows, so no `argusd stopped.` line is written to the log (the
-  CLI still prints it). This is safe — there's no critical in-memory state.
-- **Toggling search:** the dashboard's "Enable indexing" button indexes
-  immediately; the CLI `argus indexing enable` only flips the flag and defers the
-  backfill to the next `argus start` / `argus daemon restart`.
+Set things up well *before* you run, not just observe afterwards. `init` copies a
+template into a project: `CLAUDE.md` to the root, everything else into `.claude/`.
+Existing files are skipped (`--force` overwrites — except `CLAUDE.md`, which is never
+overwritten). The bundled `default` template ships a sensible `settings.json`, agents,
+commands, rules and a placeholder skill. Save your own project's setup with
+`template create`; user templates live in `~/.argus/templates/` and win over bundled ones.
 
-Logs live at `~/.argus/argusd.log` (plain text, rotated at ~1 MB × 3).
-
-### `argus claude` — project scaffolding
-
-Set good agent config *before* you run, not just observe it after. `init`
-copies a template into a project: `CLAUDE.md` goes to the project root,
-everything else into `.claude/`. Existing files are skipped (use `--force`
-to overwrite) — but an existing `CLAUDE.md` is **never** overwritten, even
-with `--force`. The bundled `default` template ships a sensible
-`settings.json`, agents, commands, rules, and a placeholder skill. Save your
-own project's setup as a reusable template with `template create`; user
-templates live in `~/.argus/templates/` and take precedence over bundled ones.
+---
 
 ## Privacy & security
 
-Argus is built for one user on one machine. The defaults reflect that:
+Argus is built for one person on one machine, and the defaults say so.
 
-- **Server binds to `127.0.0.1` only.** Nothing on your LAN/Wi-Fi/VPN can
-  reach the dashboard. Use `argus start --host 0.0.0.0` if you really
-  want LAN exposure — it prints a loud warning when you do.
-- **No external requests, ever**, except `argus pricing refresh` which
-  is a manual command that fetches one JSON file from LiteLLM's GitHub.
-  No telemetry, no analytics pings, no LLM calls.
-- **Transcript indexing is opt-in.** Cost-and-token analytics work out of
-  the box without indexing any text content. Full-text search across
-  prompts and transcripts requires explicit opt-in via Settings or
-  `argus indexing enable`. Opting out actually means out — the API
-  returns empty results, even if data is on disk.
-- **Cross-origin POSTs are rejected.** The state-changing endpoints
-  (`/api/search-index/*`) check the `Origin` header — matched exactly
-  against argus's own origin — so neither a random tab nor another app
-  on some other localhost port can silently wipe your data.
-- **A loopback `Host` header is required.** This blocks DNS rebinding,
-  where a site you visit repoints its own domain at `127.0.0.1` to become
-  same-origin with argus and read your history. Requests naming any other
-  host get a 421. (Skipped when you deliberately pass `--host 0.0.0.0`.)
-- **No embeddings, no model weights.** Search uses SQLite FTS5 — pure
-  inverted-index lexical search. Lookups are deterministic and offline.
+- **Binds to `127.0.0.1` only.** Nothing on your LAN, Wi-Fi or VPN can reach it. `--host 0.0.0.0` exists, and prints a loud warning.
+- **No external requests, ever** — except `argus pricing refresh`, a manual command that fetches one JSON file from LiteLLM's GitHub. No telemetry, no analytics, no LLM calls.
+- **Transcript indexing is opt-in.** Cost and token analytics need no text content. Full-text search over prompts and transcripts requires an explicit opt-in (Settings or `argus indexing enable`), and opting out means the API returns nothing even if data is on disk.
+- **Cross-origin writes are rejected.** State-changing endpoints check the `Origin` header against Argus's own origin — exactly — so neither a random tab nor another localhost app can flip your settings.
+- **A loopback `Host` header is required.** This defeats DNS rebinding, where a site you visit repoints its domain at `127.0.0.1` to read your history. Anything else gets a 421 (skipped only when you deliberately bind `0.0.0.0`).
+- **Transcript text never becomes HTML.** The dashboard renders every transcript-derived string as text; a test forbids raw-HTML sinks in the source.
+- **No embeddings, no model weights.** Search is a plain inverted index.
 
-Data lives at `~/.argus/argus.db`. Delete it any time with `argus wipe`
-(or just remove the file).
+Your data is one file, `~/.argus/argus.db`. `argus wipe` deletes it; so does `rm`.
+Vulnerability reports: [SECURITY.md](./SECURITY.md).
 
-For vulnerability reports, see [SECURITY.md](./SECURITY.md).
+---
 
 ## How it works
 
-1. **Ingest.** A `watchdog` observer tails every `~/.claude/projects/<project>/<session-id>.jsonl`
-   file. Lines are validated with `pydantic`, deduplicated by `message.id`,
-   and turned into normalized session/turn rows in SQLite (WAL mode).
-2. **Cost.** Per-turn cost comes from a bundled `pricing/<version>.json`
-   table sourced from [LiteLLM](https://github.com/BerriAI/litellm).
-   Tokens are exact; costs are estimates and the dashboard says so.
-3. **Tools.** Each `tool_use` block in the JSONL becomes a row in
-   `tool_calls`. Errors come from matching `tool_result.is_error` in the
-   next user message. MCP servers are extracted from tool names matching
-   `mcp__<server>__<tool>`.
-4. **Search (opt-in).** Two FTS5 virtual tables: one over `~/.claude/history.jsonl`
-   (every prompt you've ever typed, ~150 KB indexed for a heavy user),
-   one over assistant text + thinking blocks + user content + tool
-   output (~30–60 MB for hundreds of sessions). Indexing happens
-   incrementally during the normal ingest tick.
-5. **Dashboard.** Vite + React SPA (uPlot + SVG charts), statically built,
-   served by the FastAPI app (uvicorn). No server-side rendering, no Node at
-   runtime, no network beyond `/api/*`.
-6. **Detection (alerts).** A lightweight scheduler thread runs registered
-   *detectors* on a fixed cadence. Each detector reads the DB and returns
-   findings; the scheduler is the sole writer, upserting them into an
-   `alerts` table — idempotent, with a `resolved_at` lifecycle so an issue
-   that recovers then recurs fires again instead of staying silent. The
-   Overview's "What needs attention" card reads these, and critical findings
-   raise a browser notification. The v1 detector flags tools whose error rate
-   spiked versus their preceding 4-week baseline.
-7. **Shared runtime + daemon.** The watcher, scheduler, and first-pass ingest
-   are owned by a single `CoreRuntime` that both `argus start` and `argusd`
-   construct. The optional `argusd` daemon (`argus daemon`) runs that runtime in
-   its own process; a live daemon flips `argus start`
-   into a read-only viewer so the two never double-ingest. See **`argus
-   daemon`** above.
+1. **Ingest.** A `watchdog` observer tails `~/.claude/projects/<project>/<session>.jsonl`. Lines are validated with `pydantic`, de-duplicated by `message.id`, and normalised into session / turn rows in SQLite (WAL mode). Resumed sessions and sub-agent files are folded into their parent.
+2. **Cost.** Per-turn cost comes from a bundled `pricing/<version>.json` sourced from [LiteLLM](https://github.com/BerriAI/litellm). Tokens are exact; costs are estimates.
+3. **Tools.** Each `tool_use` block becomes a `tool_calls` row; errors come from the matching `tool_result`. MCP servers are parsed from `mcp__<server>__<tool>`; the `Agent` tool's `subagent_type` is kept so delegation is visible.
+4. **Search (opt-in).** Two FTS5 tables: one over `~/.claude/history.jsonl` (every prompt, ~150 KB for a heavy user), one over assistant text, thinking, user content and tool output (~30–60 MB for hundreds of sessions). Indexed incrementally during the normal ingest tick.
+5. **Detection.** A scheduler thread runs registered *detectors* every 10 minutes. Each reads the DB and returns findings; the scheduler upserts them into `alerts` with a seen / resolved lifecycle, so an issue that recovers and recurs fires again instead of staying silent.
+6. **Dashboard.** A Vite + React single-page app (uPlot and hand-drawn SVG charts), statically built and served by the FastAPI app. Analyses that aren't in the API yet — prior-window deltas, tokens per session, cache-read share, calls per day — are derived client-side from the existing endpoints. No Node at runtime, no network beyond `/api/*`.
+7. **One runtime, two hosts.** The watcher, scheduler and first-pass ingest live in a single `CoreRuntime` that both `argus start` and `argusd` construct, so they can never double-ingest.
+
+Want the deeper tour? [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+---
 
 ## Configuration
 
 | Where | Knob |
 |---|---|
-| `argus start --port <n>` | Pick a different port (default 4242). |
-| `argus start --host <h>` | Bind host (default `127.0.0.1`). Pass `0.0.0.0` for LAN exposure. |
+| `argus start --port <n>` | Port (default 4242). |
+| `argus start --host <h>` | Bind host (default `127.0.0.1`; `0.0.0.0` for LAN exposure). |
 | `argus start --data-dir <path>` | Override `~/.argus/`. |
-| `pricing/*.json` | Bundled price tables. Refresh with `argus pricing refresh`. |
+| `pricing/*.json` | Bundled price tables; refresh with `argus pricing refresh`. |
+
+### Keep more history in Claude Code itself
+
+Claude Code deletes session files after 30 days by default. Raise it in
+`~/.claude/settings.json` (minimum 1; it can't be disabled):
+
+```json
+{ "cleanupPeriodDays": 365 }
+```
+
+Argus keeps its own copy regardless — this only widens what Claude itself retains.
 
 ## Requirements
 
-- **Python ≥ 3.11.** Argus uses the stdlib `sqlite3` module — make sure
-  your Python was built with FTS5 (the standard CPython distributions
-  for macOS, Linux, and Windows all are). Argus checks at startup and
-  fails with a clear error if FTS5 is missing.
-- A `~/.claude/` directory containing real session JSONL — i.e. you've
-  used Claude Code at least once. Argus exits with a friendly message
-  if it's missing.
+- **Python ≥ 3.11** with an FTS5-enabled `sqlite3` (the standard CPython builds for macOS, Linux and Windows all are; Argus checks at startup and says so clearly if not).
+- A `~/.claude/` directory with real session JSONL — i.e. you've used Claude Code at least once.
 
-## Keep your history longer
-
-By default Claude Code deletes session files after 30 days. To extend the
-window, set `cleanupPeriodDays` in `~/.claude/settings.json`:
-
-```json
-{
-  "cleanupPeriodDays": 365
-}
-```
-
-The minimum is 1; there's no way to disable cleanup entirely. Whatever you
-set, Argus's own database keeps the data even after Claude rotates it out.
+---
 
 ## Development
 
@@ -233,14 +216,14 @@ set, Argus's own database keeps the data even after Claude rotates it out.
 git clone https://github.com/KrishBhimani/argus-code.git
 cd argus-code
 uv sync               # install deps + create venv
-uv run pytest         # ~380 tests, ~30s
-uv run argus start    # dev — runs directly from source
+uv run pytest         # ~490 tests, ~35 s
+uv run argus start    # runs directly from source
 ```
 
-The dashboard is a Vite + React project under `dashboard/` and builds via
-`npm` at release time only. End users never touch npm.
-
-Source layout:
+Dashboard work happens in `dashboard/` (Vite + React): `npm install && npm run dev`
+proxies `/api` to a running `argus start`; `npm test`, `npm run build`, `npm run size`
+and `npm run e2e` are the gates. The built copy in `dashboard-dist/` ships inside the
+wheel, so end users never touch `npm`. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ```
 python/argus/         Python ingest, store, server, CLI
