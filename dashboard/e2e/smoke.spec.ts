@@ -29,6 +29,7 @@ test('deep link survives refresh and legacy URLs redirect', async ({ page }) => 
 
 test('command palette opens with Ctrl+K', async ({ page }) => {
   await page.goto('/');
+  await expect(page.getByText('ARGUS', { exact: true })).toBeVisible(); // shell mounted (routes are code-split)
   await page.keyboard.press('Control+K');
   await expect(page.getByPlaceholder(/jump to/i)).toBeVisible();
 });
