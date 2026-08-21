@@ -1,5 +1,5 @@
 import type { TimelineTurn } from '@/lib/api/client';
-import { cumulativeCost, toolMix, turnHasError, cacheRatio } from './model';
+import { cumulativeCost, toolMix, turnHasError, cacheRatio, orderTurns } from './model';
 
 const t = (o: Partial<TimelineTurn>): TimelineTurn => ({
   sequence: 1, timestamp: '', model: 'm', fresh_input_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, output_tokens: 0, cost_usd: 0, tool_calls: [], ...o,
@@ -15,3 +15,8 @@ it('toolMix counts calls and errors per tool', () => {
 });
 
 it('cacheRatio', () => expect(cacheRatio(t({ cache_read_tokens: 75, output_tokens: 25 }))).toBe(0.75));
+
+it('orderTurns sorts by time and renumbers colliding sequences', () => {
+  const turns = [t({ sequence: 0, timestamp: '2026-08-08T10:00:00Z' }), t({ sequence: 0, timestamp: '2026-07-31T10:00:00Z' }), t({ sequence: 1, timestamp: '2026-07-31T10:00:05Z' })];
+  expect(orderTurns(turns).map((x) => [x.sequence, x.timestamp])).toEqual([[1, '2026-07-31T10:00:00Z'], [2, '2026-07-31T10:00:05Z'], [3, '2026-08-08T10:00:00Z']]);
+});

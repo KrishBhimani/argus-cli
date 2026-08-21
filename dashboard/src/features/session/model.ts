@@ -24,3 +24,14 @@ export const cacheRatio = (t: TimelineTurn) => {
 };
 
 export const firstToolLine = (t: TimelineTurn) => t.tool_calls.map((c) => c.tool_name).join(', ');
+
+/**
+ * Resumed sessions restart `sequence` at 0 in every new transcript file, so raw
+ * sequences collide. Order by timestamp (then raw sequence) and renumber 1..n so
+ * every turn has a unique, chronological position for keys, jump ids and labels.
+ */
+export function orderTurns(turns: TimelineTurn[]): TimelineTurn[] {
+  return [...turns]
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.sequence - b.sequence)
+    .map((t, i) => ({ ...t, sequence: i + 1 }));
+}

@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import type { TimelineTurn } from '@/lib/api/client';
 import { api } from '@/lib/api/client';
 import { Panel } from '@/components/ui/Panel';
-import { Chip } from '@/components/ui/Chip';
 import { Pill } from '@/components/ui/Pill';
 import { Icon } from '@/components/ui/Icon';
 import { Button } from '@/components/ui/Button';
@@ -32,13 +31,11 @@ function ToolOutput({ sessionId, toolUseId, name }: { sessionId: string; toolUse
 }
 
 export function TimelineTab({ id, turns, active }: { id: string; turns: TimelineTurn[]; active?: number }) {
-  const [errOnly, setErrOnly] = useState(false);
-  const [expandAll, setExpandAll] = useState(false);
   const [toggled, setToggled] = useState<Set<number>>(new Set());
   const [q, setQ] = useState('');
   const [limit, setLimit] = useState(CHUNK);
   const find = useQuery({ queryKey: ['transcript', id, q], queryFn: () => api.sessionTranscriptSearch(id, q), enabled: q.trim().length >= 2 });
-  const filtered = useMemo(() => (errOnly ? turns.filter(turnHasError) : turns), [turns, errOnly]);
+  const filtered = turns;
   // Long sessions (hundreds of turns with large error payloads) are rendered in chunks to keep the page responsive.
   const rows = useMemo(() => filtered.slice(0, limit), [filtered, limit]);
   const remaining = filtered.length - rows.length;
@@ -52,19 +49,16 @@ export function TimelineTab({ id, turns, active }: { id: string; turns: Timeline
       else n.add(seq);
       return n;
     });
-  // A row is open when expand-all is on (unless toggled shut), or it was toggled open, or it is the jump target.
-  const isOpen = (seq: number) => (expandAll ? !toggled.has(seq) : toggled.has(seq)) || active === seq;
-  const setAll = (v: boolean) => { setExpandAll(v); setToggled(new Set()); };
+  // A row is open when toggled, or when it is the jump target from the minimap.
+  const isOpen = (seq: number) => toggled.has(seq) || active === seq;
 
   return (
     <Panel
       title="Turns"
-      sub={`${turns.length}${errors ? ` · ${errors} with errors` : ''} · tok = fresh input + output`}
+      sub={`${turns.length} in time order${errors ? ` · ${errors} with errors` : ''} · click a row for details`}
       padded={false}
       right={
         <>
-          <Chip active={errOnly} onClick={() => setErrOnly(!errOnly)}>Errors only{errors ? ` · ${errors}` : ''}</Chip>
-          <Chip active={expandAll} onClick={() => setAll(!expandAll)}>{expandAll ? 'Collapse all' : 'Expand all'}</Chip>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find in session" className="h-6 w-48 px-2 bg-bg-2 border border-line-2 rounded-md text-[11px] outline-none" />
         </>
       }
@@ -138,7 +132,7 @@ export function TimelineTab({ id, turns, active }: { id: string; turns: Timeline
         </button>
       )}
       {rows.length === 0 && (
-        <div className="text-center text-ink-2 py-8 flex items-center justify-center gap-2"><Icon name="check" size={12} />{turns.length ? 'No failing turns.' : 'No turns recorded.'}</div>
+        <div className="text-center text-ink-2 py-8 flex items-center justify-center gap-2"><Icon name="check" size={12} />No turns recorded.</div>
       )}
     </Panel>
   );

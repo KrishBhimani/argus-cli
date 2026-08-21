@@ -13,7 +13,7 @@ import { AreaLine } from '@/components/charts/AreaLine';
 import { Legend } from '@/components/charts/Legend';
 import { useSession, useSubagents, useTimeline } from '@/lib/api/hooks';
 import { dur, fmtLocalDateTime, num, pct, shortPath, tok, usd } from '@/lib/format/format';
-import { cumulativeCost, turnHasError } from './model';
+import { cumulativeCost, orderTurns, turnHasError } from './model';
 import { OverviewTab } from './OverviewTab';
 import { TimelineTab } from './TimelineTab';
 import { SubagentsTab } from './SubagentsTab';
@@ -28,7 +28,7 @@ export default function SessionPage() {
   const tl = useTimeline(id);
   const subs = useSubagents(id);
   const [active, setActive] = useState<number | undefined>();
-  const turns = useMemo(() => tl.data?.turns ?? [], [tl.data]);
+  const turns = useMemo(() => orderTurns(tl.data?.turns ?? []), [tl.data]);
   const errors = turns.filter(turnHasError).length;
   const cum = useMemo(() => cumulativeCost(turns), [turns]);
   const cumSeries = useMemo(() => [{ name: 'cumulative cost', values: cum }], [cum]);
@@ -66,7 +66,7 @@ export default function SessionPage() {
           <div className="grid grid-cols-5 gap-3">
             <Tile label="Tokens" value={tok(tokensAll)} sub={`${num(tokensAll)} · ${pct(tokensAll ? sess.total_cache_read_tokens / tokensAll : 0, 0)} cache read`} />
             <Tile label="Estimated cost" value={usd(sess.total_cost_usd)} sub={sess.turn_count ? `${usd(sess.total_cost_usd / sess.turn_count)} / turn` : undefined} />
-            <Tile label="Turns" value={num(sess.turn_count)} sub={`${num(toolCalls)} tool calls`} />
+            <Tile label="Turns" value={turns.length ? num(turns.length) : num(sess.turn_count)} sub={`${num(toolCalls)} tool calls`} note={turns.length && turns.length !== sess.turn_count ? `${num(sess.turn_count)} raw` : undefined} />
             <Tile label="Duration" value={sess.ended_at ? dur(sess.duration_sec) : 'live'} sub={fmtLocalDateTime(sess.started_at)} />
             <Tile label="Tool errors" value={String(errors)} tone={errors ? 'crit' : 'default'} sub={errors ? `first at turn #${turns.find(turnHasError)?.sequence}` : 'none'} />
           </div>

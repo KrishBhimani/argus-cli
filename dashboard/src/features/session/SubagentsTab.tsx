@@ -15,6 +15,7 @@ import { Minimap } from '@/components/charts/Minimap';
 import { Legend } from '@/components/charts/Legend';
 import { dur, num, pct, tok, usd } from '@/lib/format/format';
 import { TimelineTab } from './TimelineTab';
+import { orderTurns } from './model';
 
 const total = (s: SubagentSummary) => s.total_tokens ?? s.tokens.fresh_input + s.tokens.output + s.tokens.cache_read + s.tokens.cache_write;
 const calls = (s: SubagentSummary) => s.tool_calls ?? s.tools.reduce((a, t) => a + t.count, 0);
@@ -46,7 +47,7 @@ function AgentStrip({ subs, selected, onPick }: { subs: SubagentSummary[]; selec
 
 function SubagentDetail({ sa, index }: { sa: SubagentSummary; index: number }) {
   const tl = useTimeline(sa.id);
-  const turns = useMemo(() => tl.data?.turns ?? [], [tl.data]);
+  const turns = useMemo(() => orderTurns(tl.data?.turns ?? []), [tl.data]);
   const [active, setActive] = useState<number | undefined>();
   const tot = total(sa);
   const pick = (seq: number) => {
