@@ -32,3 +32,6 @@ build/
 dashboard/playwright-report/
 dashboard/test-results/
 dashboard/.e2e-data/
+
+# TypeScript incremental build cache
+dashboard/*.tsbuildinfo
