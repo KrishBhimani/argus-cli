@@ -36,7 +36,8 @@ export default function SearchPage() {
   const idx = useSearchIndexStatus();
   const qc = useQueryClient();
   const enable = useMutation({ mutationFn: api.searchIndexEnable, onSuccess: () => qc.invalidateQueries({ queryKey: ['searchIndex'] }) });
-  const res = useSearch({ q: dq, limit: 200, project: project || undefined, includeSlash: slash, roles }, true);
+  const ready = dq.trim().length >= 2;
+  const res = useSearch({ q: dq, limit: 200, project: project || undefined, includeSlash: slash, roles }, ready);
   const hits = useMemo(() => res.data?.results ?? [], [res.data]);
   const spark = useMemo(() => {
     const keys = dayKeys(new Date(), 30);
@@ -83,7 +84,7 @@ export default function SearchPage() {
           )}
         </div>
         <Panel padded={false} className="grow">
-          {hits.length === 0 && <div className="text-center text-ink-2 py-10">{dq ? 'No matches.' : 'Type to search.'}</div>}
+          {hits.length === 0 && <div className="text-center text-ink-2 py-10">{!ready ? 'Type at least two characters to search.' : res.isFetching ? 'Searching…' : 'No matches.'}</div>}
           {hits.map((h, i) => {
             const text = cleanSnippet(h.snippet || h.text);
             if (!text) return null;

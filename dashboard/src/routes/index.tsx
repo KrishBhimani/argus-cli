@@ -1,4 +1,3 @@
-import { createFileRoute } from '@tanstack/react-router';
-import OverviewPage from '@/features/overview/OverviewPage';
+import { createFileRoute, lazyRouteComponent } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/')({ component: OverviewPage });
+export const Route = createFileRoute('/')({ component: lazyRouteComponent(() => import('@/features/overview/OverviewPage')) });

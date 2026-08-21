@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Session } from '@/lib/api/client';
 import { Panel } from '@/components/ui/Panel';
 import { Seg } from '@/components/ui/Seg';
@@ -17,7 +17,20 @@ const durTick = (s: number) => (s >= 86400 ? `${Math.round(s / 86400)}d` : s >= 
 export function AnalysisStrip({ sessions }: { sessions: Session[] }) {
   const [open, setOpen] = useState(true);
   const [view, setView] = useState<'scatter' | 'project'>('scatter');
-  const proj = byProject(sessions);
+  const proj = useMemo(() => byProject(sessions), [sessions]);
+  const points = useMemo(
+    () =>
+      sessions
+        .filter((s) => (s.duration_sec ?? 0) > 0)
+        .map((s) => ({
+          x: s.duration_sec ?? 1,
+          y: sessionTokens(s),
+          label: shortPath(s.project_path, 48),
+          detail: `${shortDate(s.started_at)} · ${dur(s.duration_sec)} · ${tok(sessionTokens(s))} · ${usd(s.total_cost_usd)} · ${num(s.turn_count)} turns`,
+          group: s.primary_model,
+        })),
+    [sessions],
+  );
   return (
     <Panel
       title="Analysis"
@@ -32,13 +45,7 @@ export function AnalysisStrip({ sessions }: { sessions: Session[] }) {
       {open &&
         (view === 'scatter' ? (
           <Scatter
-            points={sessions.filter((s) => (s.duration_sec ?? 0) > 0).map((s) => ({
-              x: s.duration_sec ?? 1,
-              y: sessionTokens(s),
-              label: shortPath(s.project_path, 48),
-              detail: `${shortDate(s.started_at)} · ${dur(s.duration_sec)} · ${tok(sessionTokens(s))} · ${usd(s.total_cost_usd)} · ${num(s.turn_count)} turns`,
-              group: s.primary_model,
-            }))}
+            points={points}
             xLabel="duration"
             yLabel="tokens"
             logX

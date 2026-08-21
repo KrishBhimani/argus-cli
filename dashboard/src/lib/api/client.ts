@@ -12,15 +12,20 @@ export class ApiError extends Error {
   }
 }
 
+// Schemas are enforced in dev and tests so a backend shape drift fails loudly; production
+// trusts the same-origin server and skips the parse (a 350 KB timeline costs real main-thread time).
+const VALIDATE = import.meta.env.DEV || import.meta.env.MODE === 'test';
+const decode = <T,>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, json: unknown): T => (VALIDATE ? schema.parse(json) : (json as T));
+
 async function get<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
   const r = await fetch(path, { headers: { Accept: 'application/json' } });
   if (!r.ok) throw new ApiError(r.status, `${path} → ${r.status}`);
-  return schema.parse(await r.json());
+  return decode(schema, await r.json());
 }
 async function post<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
   const r = await fetch(path, { method: 'POST', headers: { Accept: 'application/json' } });
   if (!r.ok) throw new ApiError(r.status, `${path} → ${r.status}`);
-  return schema.parse(await r.json());
+  return decode(schema, await r.json());
 }
 const enc = encodeURIComponent;
 

@@ -1,4 +1,3 @@
-import { createFileRoute } from '@tanstack/react-router';
-import AlertsPage from '@/features/alerts/AlertsPage';
+import { createFileRoute, lazyRouteComponent } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/alerts')({ component: AlertsPage });
+export const Route = createFileRoute('/alerts')({ component: lazyRouteComponent(() => import('@/features/alerts/AlertsPage')) });

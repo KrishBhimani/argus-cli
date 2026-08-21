@@ -1,4 +1,3 @@
-import { createFileRoute } from '@tanstack/react-router';
-import TrendsPage from '@/features/trends/TrendsPage';
+import { createFileRoute, lazyRouteComponent } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/trends')({ component: TrendsPage });
+export const Route = createFileRoute('/trends')({ component: lazyRouteComponent(() => import('@/features/trends/TrendsPage')) });

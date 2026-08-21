@@ -41,8 +41,13 @@ analyses in `src/lib/analysis/`.
   string (model names, paths, tool names, snippets) renders as a React text node;
   FTS5 `<mark>` highlights are split into runs by `features/search/cleanSnippet.ts`.
   Guarded by `tests/dashboard/test_no_raw_html.py`.
+- **Routes are code-split** (`lazyRouteComponent` in `src/routes/*`); the shell loads
+  first and a page's chunk is preloaded on hover (`defaultPreload: 'intent'`).
+- **Charts reuse their uPlot instance** (`UPlotChart` calls `setData` for data-only
+  changes); pass memoised `options`/`series` so a parent re-render doesn't rebuild them.
 - **API shapes are validated with Zod at the boundary** (`src/lib/api/schemas.ts`).
-  A backend shape change fails loudly in dev; recorded fixtures under
+  Validation runs in dev/tests only (`VALIDATE` in `client.ts`) — production trusts
+  the same-origin server to save main-thread time on large payloads. A backend shape change fails loudly in dev; recorded fixtures under
   `src/lib/api/__fixtures__/` (paths scrubbed) pin the contract in tests.
 - **Chart and colour rules** live in `src/components/charts/README.md` and bind
   every chart: orange is UI accent only, single-series data is blue, status

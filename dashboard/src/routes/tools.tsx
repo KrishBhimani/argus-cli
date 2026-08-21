@@ -1,4 +1,3 @@
-import { createFileRoute } from '@tanstack/react-router';
-import ToolsPage from '@/features/tools/ToolsPage';
+import { createFileRoute, lazyRouteComponent } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/tools')({ component: ToolsPage });
+export const Route = createFileRoute('/tools')({ component: lazyRouteComponent(() => import('@/features/tools/ToolsPage')) });

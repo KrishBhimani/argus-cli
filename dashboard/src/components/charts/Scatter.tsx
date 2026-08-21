@@ -4,10 +4,12 @@ import { UPlotChart, type UPlotOptions } from './UPlotChart';
 import { Legend } from './Legend';
 import { AXIS, SERIES } from './uplotTheme';
 
+const ident = (n: number) => String(n);
+
 export type ScatterPoint = { x: number; y: number; label: string; group: string; detail?: string };
 
 /** One series per group (≤5 + Other), 8 px markers with a surface ring; hover shows the point label. */
-export function Scatter({ points, xLabel, yLabel, logX = false, logY = false, formatX = String, formatY = String, height = 220, xTicks, yTicks }: {
+export function Scatter({ points, xLabel, yLabel, logX = false, logY = false, formatX = ident, formatY = ident, height = 220, xTicks, yTicks }: {
   points: ScatterPoint[]; xLabel: string; yLabel: string; logX?: boolean; logY?: boolean;
   formatX?: (n: number) => string; formatY?: (n: number) => string; height?: number;
   /** Fixed tick positions (data units); when given, only these are labelled. */

@@ -12,12 +12,14 @@ export const useTrends = (g: 'day' | 'week' | 'month', by: 'model' | 'agent') =>
   useQuery({ queryKey: ['trends', g, by], queryFn: () => api.trends(g, by) });
 export const useAlerts = () => useQuery({ queryKey: ['alerts'], queryFn: () => api.alerts(200), select: (d) => d.alerts });
 export const useUnseenAlerts = () =>
-  useQuery({ queryKey: ['alerts', 'unseen'], queryFn: () => api.unseenAlerts(), select: (d) => d.alerts, refetchInterval: 4000 });
+  useQuery({ queryKey: ['alerts', 'unseen'], queryFn: () => api.unseenAlerts(), select: (d) => d.alerts, refetchInterval: 10_000 });
 export const useMarkAlertSeen = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: api.markAlertSeen, onSuccess: () => qc.invalidateQueries({ queryKey: ['alerts'] }) });
 };
-export const useIngestStatus = () => useQuery({ queryKey: ['ingest'], queryFn: api.ingestStatus, refetchInterval: 4000 });
+// 4 s while ingesting (progress is visible), 10 s once idle.
+export const useIngestStatus = () =>
+  useQuery({ queryKey: ['ingest'], queryFn: api.ingestStatus, refetchInterval: (q) => (q.state.data && q.state.data.foregroundComplete && q.state.data.pending === 0 ? 10_000 : 4000) });
 export const usePricing = () => useQuery({ queryKey: ['pricing'], queryFn: api.pricing });
 export const useSearch = (p: Parameters<typeof api.search>[0], enabled = true) =>
   useQuery({ queryKey: ['search', p], queryFn: () => api.search(p), enabled });
