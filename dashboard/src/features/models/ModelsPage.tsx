@@ -6,15 +6,19 @@ import { ErrorPanel } from '@/components/ui/ErrorPanel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Bars } from '@/components/charts/Bars';
 import { StackedColumns } from '@/components/charts/StackedColumns';
+import { MultiLine } from '@/components/charts/MultiLine';
 import { ChartTable } from '@/components/charts/ChartTable';
 import { WINDOWS, type Window } from '@/lib/api/client';
 import { useOverview, useTrends } from '@/lib/api/hooks';
 import { perMTokens } from '@/lib/analysis/rollups';
-import { trendsToSeries } from '@/lib/analysis/series';
+import { shareOfTotal, trendsToSeries } from '@/lib/analysis/series';
 import { num, tok, usd } from '@/lib/format/format';
+
+type ShareView = 'lines' | 'columns' | 'table';
 
 export default function ModelsPage() {
   const [w, setW] = useState<Window>('30d');
+  const [shareView, setShareView] = useState<ShareView>('lines');
   const ov = useOverview(w);
   const tr = useTrends('week', 'model');
   const rows = useMemo(
@@ -27,7 +31,12 @@ export default function ModelsPage() {
   const share = useMemo(() => {
     if (!tr.data) return null;
     const s = trendsToSeries(tr.data.points.slice(-26), 'tokens');
-    return { labels: s.labels, series: s.names.map((n, i) => ({ name: n, values: s.rows[i] })) };
+    const norm = shareOfTotal(s.rows);
+    return {
+      labels: s.labels,
+      raw: s.names.map((n, i) => ({ name: n, values: s.rows[i] })),
+      pct: s.names.map((n, i) => ({ name: n, values: norm[i] })),
+    };
   }, [tr.data]);
   const totalCost = rows.reduce((a, x) => a + x.cost, 0);
 
@@ -43,8 +52,18 @@ export default function ModelsPage() {
         <Panel title="Price efficiency" sub="$ per million tokens, as experienced in this window">
           {rows.some((r) => r.tokens > 0) ? <Bars rows={rows.filter((r) => r.tokens > 0).map((r) => ({ name: r.model, value: perMTokens(r.cost, r.tokens) ?? 0 }))} format={usd} color="#3173c4" /> : <div className="text-ink-2 text-center py-6">No data.</div>}
         </Panel>
-        <Panel title="Model share by week" sub="each column = one week's fresh + output tokens, split by model · hover for numbers">
-          {share ? (share.series.length ? <StackedColumns labels={share.labels} series={share.series} share format={tok} /> : <div className="text-ink-2 text-center py-6">No data.</div>) : <Skeleton w="100%" h="220px" />}
+        <Panel
+          title="Model share by week"
+          sub="% of each week's fresh + output tokens"
+          right={<Seg options={[{ value: 'lines', label: 'lines' }, { value: 'columns', label: 'columns' }, { value: 'table', label: 'table' }]} value={shareView} onChange={setShareView} />}
+        >
+          {share ? (
+            share.raw.length ? (
+              shareView === 'lines' ? <MultiLine labels={share.labels} series={share.pct} share height={240} />
+              : shareView === 'columns' ? <StackedColumns labels={share.labels} series={share.raw} share format={tok} />
+              : <ChartTable columns={['week', ...share.raw.map((x) => x.name)]} rows={share.labels.map((l, i) => [l, ...share.pct.map((x) => `${Math.round((x.values[i] ?? 0) * 100)}%`)])} />
+            ) : <div className="text-ink-2 text-center py-6">No data.</div>
+          ) : <Skeleton w="100%" h="240px" />}
         </Panel>
         <Panel title="Per-model details" padded={false}>
           <ChartTable
