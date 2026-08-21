@@ -542,6 +542,30 @@ class Repository:
         ).fetchall()
         return [{"id": r["id"]} for r in rows]
 
+    def sessions_with_untyped_agent_calls(self, limit: int) -> list[dict[str, Any]]:
+        """Sessions holding `Agent` tool calls ingested before the adapter learned
+        the tool's current name, so their subagent_type is NULL. A default-agent
+        call legitimately has no subagent_type, so callers run this once and
+        record completion in app_meta rather than re-deriving every start."""
+        rows = self.db.execute(
+            """
+            SELECT DISTINCT session_id AS id FROM tool_calls
+            WHERE tool_name = 'Agent' AND subagent_type IS NULL
+            ORDER BY session_id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
+
+    def get_app_meta(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM app_meta WHERE key = ?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    def set_app_meta(self, key: str, value: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)", (key, value))
+        self.db.commit()
+
     # ─── Prompts ───────────────────────────────────────────────────────
 
     def insert_prompts(self, rows: list[Prompt]) -> None:

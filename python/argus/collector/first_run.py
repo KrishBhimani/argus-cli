@@ -217,7 +217,17 @@ def _backfill_missing_derived_data(
     for c in repo.sessions_with_unpriced_turns(list(table.models.keys()), 200):
         ids.add(c["id"])
         deep_reset.add(c["id"])
+    # One-shot: Agent calls ingested before the Task->Agent rename fix have
+    # subagent_type NULL. Re-read their parents once; default-agent calls stay
+    # NULL legitimately, so the flag stops this from re-running every start.
+    agent_fix_key = "backfill_agent_subagent_type_v1"
+    agent_fix_pending = repo.get_app_meta(agent_fix_key) != "1"
+    if agent_fix_pending:
+        for c in repo.sessions_with_untyped_agent_calls(200):
+            ids.add(c["id"].split("/", 1)[0])
     candidates = sorted(ids)[:200]
+    if agent_fix_pending and len(candidates) < 200:
+        repo.set_app_meta(agent_fix_key, "1")
     if not candidates:
         return
 

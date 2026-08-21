@@ -810,3 +810,22 @@ def test_subagent_summaries(repo):
 
 def test_subagent_summaries_missing_parent(repo):
     assert repo.subagent_summaries("claude_code:nope") == []
+
+
+def test_sessions_with_untyped_agent_calls_and_app_meta(repo):
+    # Regression: Agent calls ingested before the Task->Agent rename fix have
+    # subagent_type NULL; the collector re-reads those sessions once and records
+    # completion in app_meta so default-agent calls don't re-trigger it forever.
+    repo.upsert_session(SAMPLE)
+    repo.upsert_tool_calls(
+        [
+            ToolCall(id="claude_code:s1:a1", session_id=SAMPLE.id, turn_index=0, tool_name="Agent",
+                     is_error=0, input_size=10, subagent_type=None, timestamp="2026-05-01T10:00:00Z"),
+            ToolCall(id="claude_code:s1:b1", session_id=SAMPLE.id, turn_index=1, tool_name="Bash",
+                     is_error=0, input_size=10, subagent_type=None, timestamp="2026-05-01T10:00:01Z"),
+        ]
+    )
+    assert [c["id"] for c in repo.sessions_with_untyped_agent_calls(10)] == [SAMPLE.id]
+    assert repo.get_app_meta("backfill_agent_subagent_type_v1") is None
+    repo.set_app_meta("backfill_agent_subagent_type_v1", "1")
+    assert repo.get_app_meta("backfill_agent_subagent_type_v1") == "1"

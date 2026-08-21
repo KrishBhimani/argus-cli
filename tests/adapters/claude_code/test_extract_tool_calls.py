@@ -36,6 +36,18 @@ def test_emits_one_row_per_tool_use_block():
     assert calls[1].block_index == 1
 
 
+def test_subagent_type_for_agent_tool_current_name():
+    # Regression: Claude Code renamed Task -> Agent; only "Task" was recognised,
+    # so every sub-agent invocation since the rename had subagent_type NULL and
+    # the Tools page "Sub-agent invocations" panel was always empty.
+    a = _mk_assistant(
+        "m1",
+        0,
+        [{"type": "tool_use", "id": "t1", "name": "Agent", "input": {"subagent_type": "Explore", "prompt": "find x"}}],
+    )
+    assert extract_tool_calls([a], [])[0].subagent_type == "Explore"
+
+
 def test_subagent_type_only_for_task_tool():
     a = _mk_assistant(
         "m1",

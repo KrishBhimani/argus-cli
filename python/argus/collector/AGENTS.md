@@ -27,6 +27,10 @@ after a schema/feature upgrade.
   `deep_reset` (deep_reset zeroes the sub-agent file offsets). Missing-segment
   sessions therefore map to their parent + deep_reset — otherwise sub-agent
   segments never backfill and the dashboard's "Task given" stays empty.
+- **One-shot backfills are flagged in `app_meta`.** The Agent/Task `subagent_type`
+  re-read (`backfill_agent_subagent_type_v1`) marks itself done once its candidate
+  list fits in a run, because default-agent calls are NULL forever and would
+  otherwise re-trigger every start.
 - **Bounded per run.** Backfill candidates are capped (200) per `argus start`;
   large installs may need several restarts to converge. If you add a new bounded
   sweep, surface what was deferred rather than silently truncating.

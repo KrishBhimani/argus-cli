@@ -20,10 +20,15 @@ ingests files, `schemas.py` validates each line (`AssistantLine`, `UserLine`, �
 - **`extract_transcript_segments`** emits `RawSegment`s with roles `assistant`,
   `thinking`, `user`, and `tool_result`; each is byte-capped (`_cap_text`). The
   first `user` segment of a sub-agent is its "Task given" in the dashboard.
-- **Known data limitation — do not design against it:** `subagent_type` is empty
-  for every row, sub-agent ids are exactly one level deep, and there is no stored
-  workflow grouping or spawn-turn link. Don't build features that assume a nested
-  sub-agent tree, type pills, or a spawn→child edge; the data isn't there.
+- **`subagent_type` comes from the `Agent` tool (formerly `Task`).** Both names
+  are recognised (`_SUBAGENT_TOOLS` in `extract_tool_calls.py`); rows ingested
+  before the rename fix are re-read once by the collector's one-shot backfill
+  (`backfill_agent_subagent_type_v1` in `app_meta`). A call with no
+  `subagent_type` in its input (the default agent) legitimately stays NULL.
+- **Known data limitation — do not design against it:** sub-agent ids are exactly
+  one level deep, and there is no stored workflow grouping or spawn-turn link.
+  Don't build features that assume a nested sub-agent tree or a spawn→child edge;
+  the data isn't there.
 - **`ingest_file(path, offset)` is pure-ish:** it parses from a byte offset and
   returns `(result, new_offset)`. It does not write to the DB — `collector/` owns
   persistence and offset bookkeeping.
