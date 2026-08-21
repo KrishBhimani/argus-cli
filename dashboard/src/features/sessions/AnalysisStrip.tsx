@@ -7,7 +7,12 @@ import { Scatter } from '@/components/charts/Scatter';
 import { Bars } from '@/components/charts/Bars';
 import { ChartWithTable } from '@/components/charts/ChartTable';
 import { byProject, sessionTokens } from '@/lib/analysis/rollups';
-import { dur, num, shortPath, tok, usd } from '@/lib/format/format';
+import { dur, num, shortDate, shortPath, tok, usd } from '@/lib/format/format';
+
+const DUR_TICKS = [1, 10, 60, 600, 3600, 8 * 3600, 86400, 7 * 86400];
+const TOK_TICKS = [1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9];
+const tokTick = (n: number) => tok(n).replace(/\.0+(?=[kMB]$)/, '');
+const durTick = (s: number) => (s >= 86400 ? `${Math.round(s / 86400)}d` : s >= 3600 ? `${Math.round(s / 3600)}h` : s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`);
 
 export function AnalysisStrip({ sessions }: { sessions: Session[] }) {
   const [open, setOpen] = useState(true);
@@ -27,13 +32,21 @@ export function AnalysisStrip({ sessions }: { sessions: Session[] }) {
       {open &&
         (view === 'scatter' ? (
           <Scatter
-            points={sessions.filter((s) => (s.duration_sec ?? 0) > 0).map((s) => ({ x: s.duration_sec ?? 1, y: sessionTokens(s), label: `${shortPath(s.project_path)} · ${tok(sessionTokens(s))} · ${usd(s.total_cost_usd)}`, group: s.primary_model }))}
+            points={sessions.filter((s) => (s.duration_sec ?? 0) > 0).map((s) => ({
+              x: s.duration_sec ?? 1,
+              y: sessionTokens(s),
+              label: shortPath(s.project_path, 48),
+              detail: `${shortDate(s.started_at)} · ${dur(s.duration_sec)} · ${tok(sessionTokens(s))} · ${usd(s.total_cost_usd)} · ${num(s.turn_count)} turns`,
+              group: s.primary_model,
+            }))}
             xLabel="duration"
             yLabel="tokens"
             logX
             logY
-            formatX={(n) => dur(Math.round(n))}
-            formatY={tok}
+            formatX={durTick}
+            formatY={tokTick}
+            xTicks={DUR_TICKS}
+            yTicks={TOK_TICKS}
             height={200}
           />
         ) : (

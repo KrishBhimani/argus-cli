@@ -4,14 +4,16 @@ import { UPlotChart, type UPlotOptions } from './UPlotChart';
 import { Legend } from './Legend';
 import { AXIS, SERIES } from './uplotTheme';
 
-export type ScatterPoint = { x: number; y: number; label: string; group: string };
+export type ScatterPoint = { x: number; y: number; label: string; group: string; detail?: string };
 
 /** One series per group (≤5 + Other), 8 px markers with a surface ring; hover shows the point label. */
-export function Scatter({ points, xLabel, yLabel, logX = false, logY = false, formatX = String, formatY = String, height = 220 }: {
+export function Scatter({ points, xLabel, yLabel, logX = false, logY = false, formatX = String, formatY = String, height = 220, xTicks, yTicks }: {
   points: ScatterPoint[]; xLabel: string; yLabel: string; logX?: boolean; logY?: boolean;
   formatX?: (n: number) => string; formatY?: (n: number) => string; height?: number;
+  /** Fixed tick positions (data units); when given, only these are labelled. */
+  xTicks?: number[]; yTicks?: number[];
 }) {
-  const [tip, setTip] = useState<string | null>(null);
+  const [tip, setTip] = useState<{ p: ScatterPoint; left: number; top: number } | null>(null);
   // uPlot mode 1 wants x ascending; sort once and keep labels aligned.
   const sorted = useMemo(() => [...points].sort((a, b) => a.x - b.x), [points]);
   const groups = useMemo(() => {
@@ -29,11 +31,18 @@ export function Scatter({ points, xLabel, yLabel, logX = false, logY = false, fo
       legend: { show: false },
       padding: [8, 12, 0, 0],
       cursor: { points: { size: 10 } },
-      hooks: { setCursor: [(u) => { const i = u.cursor.idx; setTip(i == null ? null : sorted[i]?.label ?? null); }] },
+      hooks: {
+        setCursor: [(u) => {
+          const i = u.cursor.idx;
+          const p = i == null ? null : sorted[i];
+          if (!p || u.cursor.left == null || u.cursor.top == null || u.cursor.left < 0) { setTip(null); return; }
+          setTip({ p, left: u.cursor.left + u.bbox.left / devicePixelRatio, top: u.cursor.top });
+        }],
+      },
       scales: { x: { time: false, distr: logX ? 3 : 1 }, y: { distr: logY ? 3 : 1 } },
       axes: [
-        { ...AXIS, label: xLabel, labelFont: '10px IBM Plex Sans, sans-serif', labelSize: 14, values: (_u, v) => v.map((x) => (x == null ? '' : formatX(x))) },
-        { ...AXIS, size: 52, label: yLabel, labelFont: '10px IBM Plex Sans, sans-serif', labelSize: 14, values: (_u, v) => v.map((x) => (x == null ? '' : formatY(x))) },
+        { ...AXIS, label: xLabel, labelFont: '10px IBM Plex Sans, sans-serif', labelSize: 14, ...(xTicks ? { splits: (u) => xTicks.filter((t) => t >= u.scales.x.min! && t <= u.scales.x.max!), filter: (_u, sp) => sp } : {}), values: (_u, v) => v.map((x) => (x == null ? '' : formatX(x))) },
+        { ...AXIS, size: 52, label: yLabel, labelFont: '10px IBM Plex Sans, sans-serif', labelSize: 14, ...(yTicks ? { splits: (u) => yTicks.filter((t) => t >= u.scales.y.min! && t <= u.scales.y.max!), filter: (_u, sp) => sp } : {}), values: (_u, v) => v.map((x) => (x == null ? '' : formatY(x))) },
       ],
       series: [
         {},
@@ -45,13 +54,22 @@ export function Scatter({ points, xLabel, yLabel, logX = false, logY = false, fo
         })),
       ],
     }),
-    [groups, sorted, logX, logY, xLabel, yLabel, formatX, formatY],
+    [groups, sorted, logX, logY, xLabel, yLabel, formatX, formatY, xTicks, yTicks],
   );
   return (
     <div className="flex flex-col gap-2 relative min-w-0">
       {groups.length >= 2 && <Legend names={groups} colors={groups.map((_, i) => SERIES[i])} />}
       <UPlotChart options={options} data={data} height={height} />
-      {tip && <div className="absolute right-2 top-7 text-[11px] font-mono bg-bg-3 border border-line-2 rounded-sm px-2 py-1 pointer-events-none">{tip}</div>}
+      {tip && (
+        <div
+          className="absolute z-10 text-[11px] bg-bg-3 border border-line-2 rounded-md px-2.5 py-1.5 pointer-events-none shadow-lg flex flex-col gap-0.5 max-w-xs"
+          style={{ left: Math.min(tip.left + 14, 9999), top: tip.top + 8 }}
+        >
+          <span className="font-medium text-ink-0 truncate">{tip.p.label}</span>
+          {tip.p.detail && <span className="font-mono text-ink-1">{tip.p.detail}</span>}
+          <span className="font-mono text-ink-2">{formatX(tip.p.x)} · {formatY(tip.p.y)} · <b className="inline-block w-2 h-2 rounded-[2px] align-middle mr-1" style={{ background: SERIES[Math.min(groups.indexOf(grp(tip.p)), 5)] }} />{tip.p.group}</span>
+        </div>
+      )}
     </div>
   );
 }
