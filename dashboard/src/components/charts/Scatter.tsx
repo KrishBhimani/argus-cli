@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type uPlot from 'uplot';
 import { UPlotChart, type UPlotOptions } from './UPlotChart';
 import { Legend } from './Legend';
@@ -14,6 +14,7 @@ export function Scatter({ points, xLabel, yLabel, logX = false, logY = false, fo
   xTicks?: number[]; yTicks?: number[];
 }) {
   const [tip, setTip] = useState<{ p: ScatterPoint; left: number; top: number } | null>(null);
+  const wrap = useRef<HTMLDivElement>(null);
   // uPlot mode 1 wants x ascending; sort once and keep labels aligned.
   const sorted = useMemo(() => [...points].sort((a, b) => a.x - b.x), [points]);
   const groups = useMemo(() => {
@@ -57,15 +58,20 @@ export function Scatter({ points, xLabel, yLabel, logX = false, logY = false, fo
     [groups, sorted, logX, logY, xLabel, yLabel, formatX, formatY, xTicks, yTicks],
   );
   return (
-    <div className="flex flex-col gap-2 relative min-w-0">
+    <div ref={wrap} className="flex flex-col gap-2 relative min-w-0">
       {groups.length >= 2 && <Legend names={groups} colors={groups.map((_, i) => SERIES[i])} />}
       <UPlotChart options={options} data={data} height={height} />
       {tip && (
         <div
-          className="absolute z-10 text-[11px] bg-bg-3 border border-line-2 rounded-md px-2.5 py-1.5 pointer-events-none shadow-lg flex flex-col gap-0.5 max-w-xs"
-          style={{ left: Math.min(tip.left + 14, 9999), top: tip.top + 8 }}
+          className="absolute z-10 text-[11px] bg-bg-3 border border-line-2 rounded-md px-2.5 py-1.5 pointer-events-none shadow-lg flex flex-col gap-0.5 whitespace-nowrap"
+          style={(() => {
+            // Flip to the left of the cursor when the right half of the chart would clip the card.
+            const w = wrap.current?.clientWidth ?? 0;
+            const flip = w > 0 && tip.left > w * 0.55;
+            return flip ? { right: Math.max(0, w - tip.left + 14), top: tip.top + 8 } : { left: tip.left + 14, top: tip.top + 8 };
+          })()}
         >
-          <span className="font-medium text-ink-0 truncate">{tip.p.label}</span>
+          <span className="font-medium text-ink-0">{tip.p.label}</span>
           {tip.p.detail && <span className="font-mono text-ink-1">{tip.p.detail}</span>}
           <span className="font-mono text-ink-2">{formatX(tip.p.x)} · {formatY(tip.p.y)} · <b className="inline-block w-2 h-2 rounded-[2px] align-middle mr-1" style={{ background: SERIES[Math.min(groups.indexOf(grp(tip.p)), 5)] }} />{tip.p.group}</span>
         </div>
