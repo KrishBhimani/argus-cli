@@ -8,6 +8,8 @@ import { ErrorPanel } from '@/components/ui/ErrorPanel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Bars } from '@/components/charts/Bars';
 import { StackedColumns } from '@/components/charts/StackedColumns';
+import { AreaLine } from '@/components/charts/AreaLine';
+import { ChartTable } from '@/components/charts/ChartTable';
 import { ChartWithTable } from '@/components/charts/ChartTable';
 import { api, WINDOWS, type Window } from '@/lib/api/client';
 import { useSessions, useToolsOverview } from '@/lib/api/hooks';
@@ -18,9 +20,11 @@ import { toolCallsByDay } from './toolsOverTime';
 import { toolLabel } from '@/features/session/TimelineTab';
 
 const MAX_DERIVE_SESSIONS = 60;
+type DayView = 'columns' | 'area' | 'table';
 
 export default function ToolsPage() {
   const [w, setW] = useState<Window>('7d');
+  const [dayView, setDayView] = useState<DayView>('columns');
   const t = useToolsOverview(w);
   const sessions = useSessions();
   const inW = useMemo(() => (sessions.data ? inWindow(sessions.data, w, new Date()) : []), [sessions.data, w]);
@@ -59,13 +63,16 @@ export default function ToolsPage() {
             />
           ) : <Skeleton w="100%" h="200px" />}
         </Panel>
-        <Panel title="Tool calls per day" sub={derive ? 'top 5 tools + other, by the day each call happened' : `available for windows ≤ 30 days with ≤ ${MAX_DERIVE_SESSIONS} sessions`}>
+        <Panel
+          title="Tool calls per day"
+          sub={derive ? 'top 5 tools + other, by the day each call happened' : `available for windows ≤ 30 days with ≤ ${MAX_DERIVE_SESSIONS} sessions`}
+          right={derive ? <Seg options={[{ value: 'columns', label: 'columns' }, { value: 'area', label: 'area' }, { value: 'table', label: 'table' }]} value={dayView} onChange={setDayView} /> : undefined}
+        >
           {derive ? (
             loading ? <Skeleton w="100%" h="200px" /> : overTime.labels.length ? (
-              <ChartWithTable
-                chart={<StackedColumns labels={overTime.labels} series={overTime.series} />}
-                table={{ columns: ['day', ...overTime.series.map((s) => s.name)], rows: overTime.labels.map((l, i) => [l, ...overTime.series.map((s) => s.values[i])]) }}
-              />
+              dayView === 'columns' ? <StackedColumns labels={overTime.labels} series={overTime.series} />
+              : dayView === 'area' ? <AreaLine labels={overTime.labels} series={overTime.series} stacked format={num} />
+              : <ChartTable columns={['day', ...overTime.series.map((s) => s.name), 'total']} rows={overTime.labels.map((l, i) => [l, ...overTime.series.map((s) => s.values[i]), overTime.series.reduce((a, s) => a + (s.values[i] ?? 0), 0)])} />
             ) : <div className="text-ink-2 text-center py-6">No tool calls in window.</div>
           ) : <div className="text-ink-2 text-center py-6">Narrow the window to see this chart. (A server-side aggregate is planned.)</div>}
         </Panel>
