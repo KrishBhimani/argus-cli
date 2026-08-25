@@ -28,6 +28,14 @@ def extract_turns(lines: list[AssistantLine]) -> list[RawTurnEvent]:
         group = by_id[mid]
         first = group[0]
         usage = first.message.usage
+        # While a reply streams, Claude Code appends one line per content
+        # block. Early lines carry the API's `message_start` placeholder usage
+        # (a handful of output tokens); only the final line has the real
+        # count. Input/cache fields are fixed before generation and identical
+        # across the group, so `first` is fine for those. Output is a
+        # monotonically growing counter, so take the max rather than trusting
+        # line order.
+        output_tokens = max(line.message.usage.output_tokens for line in group)
         cache_5m = (
             usage.cache_creation.ephemeral_5m_input_tokens
             if usage.cache_creation is not None
@@ -51,7 +59,7 @@ def extract_turns(lines: list[AssistantLine]) -> list[RawTurnEvent]:
                 model=canonicalize_claude_model(first.message.model),
                 model_raw=first.message.model,
                 fresh_input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
+                output_tokens=output_tokens,
                 cache_read_tokens=usage.cache_read_input_tokens,
                 cache_write_tokens=usage.cache_creation_input_tokens,
                 cache_write_5m_tokens=cache_5m,

@@ -581,6 +581,24 @@ class Repository:
         ).fetchall()
         return [{"id": r["id"]} for r in rows]
 
+    def top_level_sessions_computed_before(self, iso_ts: str) -> list[dict[str, Any]]:
+        """Top-level sessions last recomputed before ``iso_ts``. Feeds one-shot
+        "re-read everything once" backfills: a re-ingest bumps ``computed_at``,
+        so a session drops out of this set as soon as it has been redone.
+        Sub-agent ids (containing '/') are excluded — they're re-read via their
+        parent. Unbounded on purpose: the caller filters to files still on
+        disk before applying the per-run cap, so deleted sessions can't
+        crowd out live ones."""
+        rows = self.db.execute(
+            """
+            SELECT id FROM sessions
+            WHERE computed_at < ? AND instr(id, '/') = 0
+            ORDER BY id
+            """,
+            (iso_ts,),
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
+
     def get_app_meta(self, key: str) -> str | None:
         row = self.db.execute("SELECT value FROM app_meta WHERE key = ?", (key,)).fetchone()
         return None if row is None else str(row["value"])

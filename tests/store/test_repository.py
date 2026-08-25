@@ -834,6 +834,20 @@ def test_subagent_summaries_missing_parent(repo):
     assert repo.subagent_summaries("claude_code:nope") == []
 
 
+def test_top_level_sessions_computed_before(repo):
+    # Regression: output_tokens were taken from the first streamed line of a
+    # message (placeholder usage). The one-shot backfill re-reads every
+    # top-level session computed before the fix was first seen; sub-agents are
+    # walked via their parent so they're excluded here.
+    old = SAMPLE.model_copy(update={"id": "claude_code:old", "computed_at": "2026-01-01T00:00:00+00:00"})
+    new = SAMPLE.model_copy(update={"id": "claude_code:new", "computed_at": "2026-09-01T00:00:00+00:00"})
+    sub = SAMPLE.model_copy(update={"id": "claude_code:old/agent-1", "computed_at": "2026-01-01T00:00:00+00:00"})
+    for s in (old, new, sub):
+        repo.upsert_session(s)
+    got = [c["id"] for c in repo.top_level_sessions_computed_before("2026-06-01T00:00:00+00:00")]
+    assert got == ["claude_code:old"]
+
+
 def test_sessions_with_untyped_agent_calls_and_app_meta(repo):
     # Regression: Agent calls ingested before the Task->Agent rename fix have
     # subagent_type NULL; the collector re-reads those sessions once and records

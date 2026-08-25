@@ -152,6 +152,103 @@ def test_backfill_fills_missing_tool_use_ids(tmp_path: Path, repo):
     assert repo.sessions_missing_tool_use_ids(10) == []
 
 
+def test_backfill_rereads_streamed_output_tokens_once(tmp_path: Path, repo):
+    """REGRESSION: turns ingested when extract_turns took usage from the first
+    streamed line hold placeholder output_tokens. The startup backfill re-reads
+    every session on disk once (flagged in app_meta), including sub-agent
+    files, and does not re-run on the next start."""
+    from argus.collector.first_run import (
+        STREAMED_OUTPUT_FIX_KEY,
+        _backfill_missing_derived_data,
+    )
+    from argus.collector.pipeline import ingest_file
+
+    claude_root = tmp_path / ".claude"
+    proj = claude_root / "projects" / "C--proj"
+    (proj / "s1" / "subagents").mkdir(parents=True)
+
+    def line(sid: str, out: int, stop: str | None, uuid: str) -> str:
+        return json.dumps(
+            {
+                "type": "assistant",
+                "sessionId": sid,
+                "uuid": uuid,
+                "timestamp": "2026-05-01T00:00:00Z",
+                "cwd": "C:/proj",
+                "version": "2.1.94",
+                "userType": "external",
+                "entrypoint": "cli",
+                "message": {
+                    "id": "m1",
+                    "model": "claude-opus-4-7",
+                    "role": "assistant",
+                    "stop_reason": stop,
+                    "content": [
+                        {"type": "tool_use", "id": f"tu_{uuid}", "name": "Bash", "input": {}}
+                    ],
+                    "usage": {
+                        "input_tokens": 1,
+                        "output_tokens": out,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                    },
+                },
+            }
+        )
+
+    parent = proj / "s1.jsonl"
+    sub = proj / "s1" / "subagents" / "agent-a.jsonl"
+    parent.write_text(line("s1", 7, None, "a") + "\n" + line("s1", 642, "tool_use", "b") + "\n",
+                      encoding="utf-8")
+    sub.write_text(line("s1", 3, None, "c") + "\n" + line("s1", 500, "end_turn", "d") + "\n",
+                   encoding="utf-8")
+
+    adapter = ClaudeCodeAdapter(claude_root)
+    table = load_pricing_table()
+    ingest_file(adapter, parent, repo, table)
+
+    # Simulate rows written by the pre-fix extractor (first-line placeholder).
+    with repo.db:
+        repo.db.execute("UPDATE turns SET output_tokens = 7 WHERE session_id = 'claude_code:s1'")
+        repo.db.execute("UPDATE turns SET output_tokens = 3 WHERE session_id = 'claude_code:s1/agent-a'")
+        repo.db.execute("UPDATE sessions SET computed_at = '2026-01-01T00:00:00+00:00'")
+    assert repo.get_app_meta(STREAMED_OUTPUT_FIX_KEY) is None
+
+    _backfill_missing_derived_data([adapter], repo, table)
+
+    out = {r["session_id"]: r["output_tokens"] for r in repo.db.execute(
+        "SELECT session_id, output_tokens FROM turns")}
+    assert out == {"claude_code:s1": 642, "claude_code:s1/agent-a": 500}
+    assert repo.get_app_meta(STREAMED_OUTPUT_FIX_KEY) == "1"
+
+    # Second start: nothing is re-read. A re-ingest recomputes the session and
+    # bumps computed_at, so an unchanged computed_at proves it didn't run.
+    computed = lambda: {r["id"]: r["computed_at"] for r in repo.db.execute(  # noqa: E731
+        "SELECT id, computed_at FROM sessions")}
+    before = computed()
+    _backfill_missing_derived_data([adapter], repo, table)
+    assert computed() == before
+
+
+def test_streamed_output_fix_is_marked_done_on_a_fresh_db(tmp_path: Path, repo):
+    """A fresh install has nothing to correct: the one-shot flag is set before
+    the first ingest so the files it just read aren't re-read next start."""
+    from argus.collector.first_run import STREAMED_OUTPUT_FIX_KEY
+
+    claude_root = tmp_path / ".claude"
+    proj = claude_root / "projects" / "C--proj"
+    proj.mkdir(parents=True)
+    (proj / "s1.jsonl").write_text(
+        _line("s1", "m1", "2026-05-22T00:00:00Z") + "\n", encoding="utf-8"
+    )
+    handle = run_first_pass_ingest([ClaudeCodeAdapter(claude_root)], repo,
+                                   load_pricing_table(), recent_days=30)
+    handle.wait_backfill(timeout=10)
+    handle.join(timeout=10)
+    assert repo.get_app_meta(STREAMED_OUTPUT_FIX_KEY) == "1"
+    assert repo.get_app_meta(STREAMED_OUTPUT_FIX_KEY + "_started_at") is None
+
+
 def test_backfill_reprices_zero_cost_turns(tmp_path: Path, repo):
     """Turns ingested before their model was in the pricing table (cost 0)
     get repriced by the startup backfill once the table knows the model."""
