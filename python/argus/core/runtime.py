@@ -58,18 +58,53 @@ class CoreRuntime:
         self._watcher = None
         self._scheduler = None
 
-    def start(self) -> None:
+    def start(self, *, require_adapters: bool = True) -> None:
+        """Open the DB and begin ingesting.
+
+        ``require_adapters=False`` is for long-running services (argusd): a
+        missing ``~/.claude`` is a "not yet" rather than an error, so we come up
+        idle and let :meth:`try_activate` pick things up when the directory
+        appears. The foreground ``argus start`` keeps the default, because
+        failing immediately with a clear message is better feedback there.
+        """
         self._db = open_db(self._data_dir / "argus.db", read_only=self.read_only)
         self.repo = Repository(self._db)
+        self.pricing_table = load_pricing_table()
 
         self.adapters = available_adapters()
         if not self.adapters:
-            raise NoAdaptersError(
-                "No adapter data found. Argus expects ~/.claude/ (Claude Code) "
-                "to be present at minimum."
+            if require_adapters:
+                raise NoAdaptersError(
+                    "No adapter data found. Argus expects ~/.claude/ (Claude Code) "
+                    "to be present at minimum."
+                )
+            logger.warning(
+                "No agent data found (~/.claude/ is missing). Staying up and "
+                "watching for it — ingest starts automatically once it appears."
             )
+            return
+
+        self._activate()
+
+    def try_activate(self) -> bool:
+        """Start ingesting if adapters have appeared since startup.
+
+        Returns True only on the transition from "nothing to do" to "running",
+        so callers can log it once. Cheap and idempotent — safe to poll.
+        """
+        if self.adapters or self.repo is None or self.read_only:
+            return False
+        found = available_adapters()
+        if not found:
+            return False
+        self.adapters = found
+        self._activate()
+        return True
+
+    def _activate(self) -> None:
+        """Kick off first-pass ingest, the watcher, and the detector scheduler."""
+        assert self.repo is not None and self.pricing_table is not None
         logger.info("Detected adapters: %s", ", ".join(a.agent for a in self.adapters))
-        self.pricing_table = load_pricing_table()
 
         if self.read_only:
             logger.info("argusd active — dashboard read-only (no ingest/scheduler).")

@@ -29,6 +29,16 @@ Delegated subtrees (see their own AGENTS.md): `store/`, `collector/`, `adapters/
   user-facing command, keep the old name as a `hidden=True` alias and nudge to the
   new one (precedent: `search` → `indexing`). Update help strings, the daemon
   read-only API hint, and dashboard copy together.
+- **A missing `~/.claude` is fatal for `argus start` but not for `argusd`.**
+  `CoreRuntime.start(require_adapters=True)` (the foreground default) raises
+  `NoAdaptersError` — immediate, readable feedback. The daemon
+  (`daemon/service.py`) passes `require_adapters=False`, comes up idle with the
+  DB open, and polls `CoreRuntime.try_activate()` every `adapter_poll_sec`
+  (30 s) so ingest starts by itself once the directory appears (issue #11).
+  `try_activate()` is idempotent and returns `True` only on the idle→running
+  transition, so callers can log it once. Keep `_FakeRuntime` in
+  `tests/daemon/test_service.py` signature-compatible with `CoreRuntime` — it
+  asserts the daemon requests the tolerant mode.
 - **Privacy stays intact:** no network calls or telemetry beyond opt-in
   `argus pricing refresh`. Don't add outbound calls.
 
