@@ -211,7 +211,7 @@ class Repository:
         turns = self.get_turns_for_session(session_id)
         call_rows = self.db.execute(
             """
-            SELECT id, turn_index, tool_name, is_error, input_size, subagent_type
+            SELECT id, turn_index, tool_name, is_error, input_size, subagent_type, timestamp
             FROM tool_calls WHERE session_id = ?
             ORDER BY turn_index, timestamp, id
             """,
@@ -240,10 +240,33 @@ class Repository:
                 ).fetchall()
                 error_text = {r["tool_use_id"]: r["text"] for r in seg_rows}
 
+        # Resumed sessions restart `sequence` in every new transcript file, so
+        # turn_index alone is ambiguous: a session resumed 15 times has 15 turns
+        # numbered 0. Attaching by turn_index multiplied every tool call by the
+        # number of resumes (78k "calls" for a session with 351). Attach each
+        # call to exactly one turn: among the turns sharing its turn_index, the
+        # latest whose timestamp is not after the call's (calls carry their
+        # assistant message's time); if none precede it, the earliest.
+        turns_by_seq: dict[int, list[int]] = {}
+        for i, t in enumerate(turns):
+            turns_by_seq.setdefault(t.sequence, []).append(i)
+        for idxs in turns_by_seq.values():
+            idxs.sort(key=lambda i: turns[i].timestamp)
+
         calls_by_turn: dict[int, list[dict[str, Any]]] = {}
         for r in call_rows:
+            cands = turns_by_seq.get(r["turn_index"])
+            if not cands:
+                continue
+            ts = r["timestamp"] or ""
+            pick = cands[0]
+            for i in cands:
+                if turns[i].timestamp <= ts:
+                    pick = i
+                else:
+                    break
             tu_id = r["id"][len(prefix):] if r["id"].startswith(prefix) else r["id"]
-            calls_by_turn.setdefault(r["turn_index"], []).append(
+            calls_by_turn.setdefault(pick, []).append(
                 {
                     "tool_name": r["tool_name"],
                     "tool_use_id": tu_id,
@@ -264,9 +287,9 @@ class Repository:
                 "cache_write_tokens": t.cache_write_tokens,
                 "output_tokens": t.output_tokens,
                 "cost_usd": t.cost_usd,
-                "tool_calls": calls_by_turn.get(t.sequence, []),
+                "tool_calls": calls_by_turn.get(i, []),
             }
-            for t in turns
+            for i, t in enumerate(turns)
         ]
 
     # ─── File offsets / parse errors ───────────────────────────────────
@@ -541,6 +564,48 @@ class Repository:
             (limit,),
         ).fetchall()
         return [{"id": r["id"]} for r in rows]
+
+    def sessions_with_untyped_agent_calls(self, limit: int) -> list[dict[str, Any]]:
+        """Sessions holding `Agent` tool calls ingested before the adapter learned
+        the tool's current name, so their subagent_type is NULL. A default-agent
+        call legitimately has no subagent_type, so callers run this once and
+        record completion in app_meta rather than re-deriving every start."""
+        rows = self.db.execute(
+            """
+            SELECT DISTINCT session_id AS id FROM tool_calls
+            WHERE tool_name = 'Agent' AND subagent_type IS NULL
+            ORDER BY session_id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
+
+    def top_level_sessions_computed_before(self, iso_ts: str) -> list[dict[str, Any]]:
+        """Top-level sessions last recomputed before ``iso_ts``. Feeds one-shot
+        "re-read everything once" backfills: a re-ingest bumps ``computed_at``,
+        so a session drops out of this set as soon as it has been redone.
+        Sub-agent ids (containing '/') are excluded — they're re-read via their
+        parent. Unbounded on purpose: the caller filters to files still on
+        disk before applying the per-run cap, so deleted sessions can't
+        crowd out live ones."""
+        rows = self.db.execute(
+            """
+            SELECT id FROM sessions
+            WHERE computed_at < ? AND instr(id, '/') = 0
+            ORDER BY id
+            """,
+            (iso_ts,),
+        ).fetchall()
+        return [{"id": r["id"]} for r in rows]
+
+    def get_app_meta(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM app_meta WHERE key = ?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    def set_app_meta(self, key: str, value: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)", (key, value))
+        self.db.commit()
 
     # ─── Prompts ───────────────────────────────────────────────────────
 

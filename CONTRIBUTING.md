@@ -24,6 +24,18 @@ Change a file, restart, see the result.
 
 If you don't have `uv` yet: <https://docs.astral.sh/uv/getting-started/installation/>.
 
+## Dashboard dev loop
+
+```sh
+uv run argus start                           # backend on :4242
+cd dashboard && npm install && npm run dev   # Vite on :5173, proxies /api to :4242
+npm test && npm run build && npm run size    # before committing
+```
+
+The dashboard is a Vite + React SPA; see `dashboard/AGENTS.md` for the ship
+chain (`dashboard-dist/` must be refreshed and committed with every source
+change) and `npm run e2e` for the Playwright smoke test.
+
 ## Running the built form
 
 CI builds and tests on every push. To smoke-test the built wheel
@@ -66,7 +78,7 @@ for the full catalog.
   tracked `dashboard-dist/` matches what the build produces. A source edit
   committed without refreshing the shipped copy means users run the old UI —
   that has historically shipped an unfixed XSS, so the check is a hard fail.
-  It compares file *names*, which Astro content-hashes, rather than bytes
+  It compares file *names*, which Vite content-hashes, rather than bytes
   (`dashboard-dist/` is tracked and so checked out CRLF on Windows, while a
   fresh build is LF — a difference that says nothing about staleness).
 

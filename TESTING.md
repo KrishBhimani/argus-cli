@@ -292,6 +292,28 @@ assertions don't translate.
 - `clearAllSegments` wipes the table AND the FTS5 index (search after
   clear returns 0)
 
+### `dashboard/` (Python-side guards)
+
+| File | Covers |
+|---|---|
+| `tests/dashboard/test_no_raw_html.py` | Scans every `dashboard/src/**/*.ts(x)` for `dangerouslySetInnerHTML` / `innerHTML` / `insertAdjacentHTML`. React text nodes are the only sanctioned way to render JSONL-derived strings. Replaces the ECharts formatter guard from the Astro era. |
+| `tests/server/test_spa_fallback.py` | Deep links (`/sessions/<id>`, `/alerts`, legacy `/session?id=`) serve `index.html`; `/api/*` and asset misses stay 404; no fallback without a dashboard dir. |
+
+### `dashboard/` (JavaScript — run in `dashboard/`)
+
+- `npm test` — Vitest + Testing Library + jsdom, files co-located as `*.test.ts(x)`:
+  `lib/format` (formatter tiers), `lib/analysis` (windows, deltas, rollups,
+  series, composition, weekday x hour), `lib/api` (Zod schemas against recorded
+  fixtures, window-name mapping), `components/ui` (Tile delta rules, Pill
+  icon+label invariant, Seg), `components/charts` (Bars scaling + error segment,
+  Meter, CalendarHeatmap, AreaLine legend rule, Minimap error flag + click),
+  `features/*` (overview deltas, session filters, timeline model, tool calls per
+  day, snippet cleaning, Ctrl+K palette), `app/shell` (sidebar groups + badge).
+- `npm run e2e` — Playwright smoke (`dashboard/e2e/smoke.spec.ts`): every route
+  renders its crumb with no page errors against an empty data dir; deep link
+  survives refresh; legacy URLs redirect; Ctrl+K opens. Serves the tracked
+  `dashboard-dist/`, so refresh it first. One-time `npx playwright install chromium`.
+
 ### Top-level
 
 #### `src/e2e.test.ts` — end-to-end smoke (1 test)

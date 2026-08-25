@@ -10,6 +10,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..adapters.base import Adapter
@@ -31,6 +32,13 @@ class IngestStatus:
 #: Name of the background backfill thread. Public so shutdown paths (and the
 #: test fixture that closes the DB) can find and join it without a handle.
 FIRST_RUN_THREAD_NAME = "argus-firstrun-bg"
+
+#: app_meta flag for the one-shot re-read that corrects output_tokens stored
+#: from a message's first streamed line (placeholder usage). "1" once every
+#: session that was still on disk has been re-ingested. The companion
+#: ``…_started_at`` key pins the cutoff so the sweep converges under the
+#: per-run cap: a re-ingest bumps ``sessions.computed_at`` past it.
+STREAMED_OUTPUT_FIX_KEY = "backfill_streamed_output_tokens_v1"
 
 
 def join_first_run_threads(timeout: float = 10.0) -> list[str]:
@@ -113,6 +121,7 @@ def run_first_pass_ingest(
     """
     cutoff = time.time() - recent_days * 86_400
     handle = FirstRunHandle()
+    _prepare_streamed_output_fix(repo)
 
     # Phase 1 (foreground, sync, in the calling thread).
     recent: list[tuple[Adapter, Path]] = []
@@ -188,6 +197,35 @@ def run_first_pass_ingest(
     return handle
 
 
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _streamed_fix_started_at(repo: Repository) -> str:
+    """Return the cutoff for the streamed-output re-read, stamping it once.
+
+    Called from ``run_first_pass_ingest`` *before* any ingest so sessions
+    written by this (fixed) process land after the cutoff and aren't re-read.
+    A fresh DB has nothing to correct, so the fix is marked done outright.
+    The backfill also calls this as a fallback for direct callers.
+    """
+    key = STREAMED_OUTPUT_FIX_KEY + "_started_at"
+    started_at = repo.get_app_meta(key)
+    if started_at is None:
+        started_at = _iso_now()
+        repo.set_app_meta(key, started_at)
+    return started_at
+
+
+def _prepare_streamed_output_fix(repo: Repository) -> None:
+    if repo.get_app_meta(STREAMED_OUTPUT_FIX_KEY) == "1":
+        return
+    if not repo.list_sessions(limit=1):
+        repo.set_app_meta(STREAMED_OUTPUT_FIX_KEY, "1")
+        return
+    _streamed_fix_started_at(repo)
+
+
 def _backfill_missing_derived_data(
     adapters: list[Adapter], repo: Repository, table: PricingTable
 ) -> None:
@@ -217,15 +255,43 @@ def _backfill_missing_derived_data(
     for c in repo.sessions_with_unpriced_turns(list(table.models.keys()), 200):
         ids.add(c["id"])
         deep_reset.add(c["id"])
-    candidates = sorted(ids)[:200]
-    if not candidates:
-        return
-
+    # One-shot: Agent calls ingested before the Task->Agent rename fix have
+    # subagent_type NULL. Re-read their parents once; default-agent calls stay
+    # NULL legitimately, so the flag stops this from re-running every start.
+    agent_fix_key = "backfill_agent_subagent_type_v1"
+    agent_fix_pending = repo.get_app_meta(agent_fix_key) != "1"
+    if agent_fix_pending:
+        for c in repo.sessions_with_untyped_agent_calls(200):
+            ids.add(c["id"].split("/", 1)[0])
     # session_id "claude_code:<basename>" → file path lookup.
     file_by_basename: dict[str, tuple[Adapter, Path]] = {}
     for a in adapters:
         for f in a.discover_session_files():
             file_by_basename[f.stem] = (a, f)
+
+    # One-shot: turns ingested before extract_turns learned to take
+    # output_tokens from a message's final streamed line hold placeholder
+    # counts. Nothing in the DB distinguishes them, so re-read every session
+    # still on disk (sub-agents too) once. Sessions whose transcript Claude
+    # Code has since deleted can't be corrected and must not block completion.
+    streamed_fix_pending = repo.get_app_meta(STREAMED_OUTPUT_FIX_KEY) != "1"
+    if streamed_fix_pending:
+        started_at = _streamed_fix_started_at(repo)
+        stale_on_disk = [
+            c["id"]
+            for c in repo.top_level_sessions_computed_before(started_at)
+            if c["id"].split(":", 1)[-1] in file_by_basename
+        ]
+        ids.update(stale_on_disk)
+        deep_reset.update(stale_on_disk)
+
+    candidates = sorted(ids)[:200]
+    if agent_fix_pending and len(candidates) < 200:
+        repo.set_app_meta(agent_fix_key, "1")
+    if streamed_fix_pending and len(candidates) < 200:
+        repo.set_app_meta(STREAMED_OUTPUT_FIX_KEY, "1")
+    if not candidates:
+        return
 
     for id_ in candidates:
         if "/" in id_:  # sub-agent rollup ids — walked via parents

@@ -11,8 +11,9 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ..adapters.base import Adapter
 from ..collector.first_run import FirstRunHandle
@@ -147,7 +148,30 @@ def build_app(repo: Repository, opts: ServerOpts) -> FastAPI:
     app.include_router(api)
 
     # Static dashboard mount LAST so /api/* routes win.
+    #
+    # The dashboard is a client-routed SPA: a deep link such as /sessions/<id>
+    # exists only in the browser, so a refresh must serve index.html and let
+    # the client router take over. ``StaticFiles(html=True)`` only does that at
+    # directory roots, hence the 404 handler below. Paths whose last segment
+    # has an extension (assets) and /api/* misses stay real 404s.
     if opts.dashboard_dir.exists():
+        index_html = opts.dashboard_dir / "index.html"
+
+        @app.exception_handler(StarletteHTTPException)
+        async def _spa_fallback(request: Request, exc: StarletteHTTPException):
+            path = request.url.path
+            if (
+                exc.status_code == 404
+                and request.method == "GET"
+                and not path.startswith("/api/")
+                and "." not in path.rsplit("/", 1)[-1]
+                and index_html.is_file()
+            ):
+                return FileResponse(index_html, media_type="text/html")
+            return JSONResponse(
+                {"detail": exc.detail}, status_code=exc.status_code, headers=getattr(exc, "headers", None)
+            )
+
         app.mount(
             "/",
             SafeStaticFiles(directory=str(opts.dashboard_dir), html=True),

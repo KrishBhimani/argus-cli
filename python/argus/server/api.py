@@ -133,7 +133,52 @@ class ApiDeps:
     daemon: bool = False
 
 
+class _ReadCache:
+    """Memoises expensive read-only aggregates (overview, trends, tools) per
+    request key until the underlying data changes.
+
+    The fingerprint is a handful of O(1)-ish SQLite lookups (row counts and
+    max rowids of the tables those endpoints read) plus the current UTC hour. Ingest appends rows and
+    upserts sessions, so any new data moves at least one component; a
+    pricing refresh bumps ``computed_at``. Nothing else is read by the cached
+    endpoints, so a stable fingerprint means a byte-identical answer.
+    """
+
+    def __init__(self, repo: Repository) -> None:
+        self._repo = repo
+        self._entries: dict[tuple[Any, ...], tuple[tuple[Any, ...], Any]] = {}
+
+    def fingerprint(self) -> tuple[Any, ...]:
+        row = self._repo.db.execute(
+            """
+            SELECT (SELECT COUNT(*) FROM sessions),
+                   (SELECT MAX(computed_at) FROM sessions),
+                   (SELECT MAX(rowid) FROM turns),
+                   (SELECT COUNT(*) FROM turns),
+                   (SELECT MAX(rowid) FROM tool_calls),
+                   (SELECT COUNT(*) FROM tool_calls)
+            """
+        ).fetchone()
+        # Window cutoffs ("today", "7d", ...) are relative to *now*, so time is an
+        # input too; bucketing it to the hour bounds staleness at the window edge
+        # without defeating the cache.
+        hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+        return (*row, hour)
+
+    def get(self, key: tuple[Any, ...], compute: Callable[[], Any]) -> Any:
+        fp = self.fingerprint()
+        hit = self._entries.get(key)
+        if hit is not None and hit[0] == fp:
+            return hit[1]
+        value = compute()
+        self._entries[key] = (fp, value)
+        if len(self._entries) > 64:  # bounded: a handful of window/granularity combos
+            self._entries.pop(next(iter(self._entries)))
+        return value
+
+
 def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
+    cache = _ReadCache(repo)
     """Build the ``/api/*`` router."""
     api = APIRouter()
 
@@ -187,6 +232,9 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
 
     @api.get("/api/overview")
     def get_overview(window: str = "7d") -> dict[str, Any]:
+        return cache.get(("overview", window), lambda: _overview(window))
+
+    def _overview(window: str) -> dict[str, Any]:
         cutoff = _cutoff_iso_for_window(window)
         rows = repo.aggregate_turns_by_day(cutoff)
         session_meta: dict[str, Session] = {
@@ -265,6 +313,9 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
     def get_trends(
         granularity: str = "day", groupBy: str = "agent"  # noqa: N803
     ) -> dict[str, Any]:
+        return cache.get(("trends", granularity, groupBy), lambda: _trends(granularity, groupBy))
+
+    def _trends(granularity: str, groupBy: str) -> dict[str, Any]:  # noqa: N803
         rows = repo.aggregate_turns_by_day("")
         session_agent: dict[str, str] = {
             s.id: s.agent for s in repo.list_sessions(limit=100_000)
@@ -308,6 +359,9 @@ def build_api(repo: Repository, deps: ApiDeps) -> APIRouter:
 
     @api.get("/api/tools/overview")
     def tools_overview(window: str = "7d") -> dict[str, Any]:
+        return cache.get(("tools", window), lambda: _tools_overview(window))
+
+    def _tools_overview(window: str) -> dict[str, Any]:
         cutoff = _cutoff_iso_for_window(window)
         totals = repo.tool_calls_total(cutoff)
         leaderboard_raw = repo.tool_leaderboard(cutoff, 20)

@@ -7,6 +7,11 @@ from ..base import RawToolCall
 from .schemas import AssistantLine, UserLine
 
 
+# The sub-agent tool was called "Task" in early Claude Code and is "Agent" now;
+# both carry the chosen agent in input.subagent_type.
+_SUBAGENT_TOOLS = frozenset({"Task", "Agent"})
+
+
 def _safe_json_length(v: object) -> int:
     """Length of JSON-stringified ``v``, matching JS ``JSON.stringify`` byte count."""
     try:
@@ -65,7 +70,7 @@ def extract_tool_calls(
                 use_id = block.get("id") or ""
                 subagent = (
                     inp.get("subagent_type")
-                    if name == "Task" and isinstance(inp, dict) and isinstance(inp.get("subagent_type"), str)
+                    if name in _SUBAGENT_TOOLS and isinstance(inp, dict) and isinstance(inp.get("subagent_type"), str)
                     else None
                 )
                 out.append(

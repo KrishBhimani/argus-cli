@@ -27,6 +27,19 @@ after a schema/feature upgrade.
   `deep_reset` (deep_reset zeroes the sub-agent file offsets). Missing-segment
   sessions therefore map to their parent + deep_reset — otherwise sub-agent
   segments never backfill and the dashboard's "Task given" stays empty.
+- **One-shot backfills are flagged in `app_meta`.** The Agent/Task `subagent_type`
+  re-read (`backfill_agent_subagent_type_v1`) marks itself done once its candidate
+  list fits in a run, because default-agent calls are NULL forever and would
+  otherwise re-trigger every start.
+- **The streamed-output re-read (`backfill_streamed_output_tokens_v1`) is a
+  "re-read everything on disk once" sweep.** Pre-fix rows hold placeholder
+  `output_tokens` and nothing in the DB distinguishes them, so the candidate
+  set is every top-level session whose `computed_at` predates the companion
+  `…_started_at` stamp and whose file still exists (deep_reset for sub-agents).
+  The stamp is written by `run_first_pass_ingest` **before** any ingest so this
+  process's own writes land after it; a fresh DB marks the fix done outright.
+  Sessions whose transcript Claude Code already deleted keep their old values —
+  the archive can't be corrected from data that no longer exists.
 - **Bounded per run.** Backfill candidates are capped (200) per `argus start`;
   large installs may need several restarts to converge. If you add a new bounded
   sweep, surface what was deferred rather than silently truncating.

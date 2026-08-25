@@ -649,6 +649,28 @@ def test_session_timeline_nests_calls_under_turns(repo):
     assert tl[0]["fresh_input_tokens"] == 100
 
 
+def test_session_timeline_attaches_each_call_once_on_resumed_sessions(repo):
+    # Regression: a resumed session has several turns with the same `sequence`
+    # (numbering restarts per transcript file). Attaching calls by turn_index
+    # alone duplicated every call onto every same-numbered turn — the Tools page
+    # showed 78k calls for a session holding 351. Each call must land on exactly
+    # one turn: the same-sequence turn closest before it in time.
+    repo.upsert_session(session_factory("s1", "2026-05-01T00:00:00Z"))
+    first = turn_factory("s1:m0", "s1", "2026-05-01T00:00:00Z")          # sequence 0, first file
+    resumed = turn_factory("s1:m0b", "s1", "2026-05-01T01:00:00Z")       # sequence 0 again, resumed file
+    repo.upsert_turn(first)
+    repo.upsert_turn(resumed)
+    repo.upsert_tool_calls([
+        _tool_call("s1", "tu_a", tool_name="Read", ts="2026-05-01T00:00:02Z"),
+        _tool_call("s1", "tu_b", tool_name="Bash", ts="2026-05-01T01:00:02Z"),
+    ])
+    tl = repo.session_timeline("s1")
+    by_ts = {t["timestamp"]: [c["tool_use_id"] for c in t["tool_calls"]] for t in tl}
+    assert by_ts["2026-05-01T00:00:00Z"] == ["tu_a"]
+    assert by_ts["2026-05-01T01:00:00Z"] == ["tu_b"]
+    assert sum(len(t["tool_calls"]) for t in tl) == repo.count_tool_calls_for_session("s1")
+
+
 def test_session_timeline_attaches_error_text_when_indexed(repo):
     _timeline_fixture(repo)
     repo.set_search_indexing_enabled(True)
@@ -810,3 +832,36 @@ def test_subagent_summaries(repo):
 
 def test_subagent_summaries_missing_parent(repo):
     assert repo.subagent_summaries("claude_code:nope") == []
+
+
+def test_top_level_sessions_computed_before(repo):
+    # Regression: output_tokens were taken from the first streamed line of a
+    # message (placeholder usage). The one-shot backfill re-reads every
+    # top-level session computed before the fix was first seen; sub-agents are
+    # walked via their parent so they're excluded here.
+    old = SAMPLE.model_copy(update={"id": "claude_code:old", "computed_at": "2026-01-01T00:00:00+00:00"})
+    new = SAMPLE.model_copy(update={"id": "claude_code:new", "computed_at": "2026-09-01T00:00:00+00:00"})
+    sub = SAMPLE.model_copy(update={"id": "claude_code:old/agent-1", "computed_at": "2026-01-01T00:00:00+00:00"})
+    for s in (old, new, sub):
+        repo.upsert_session(s)
+    got = [c["id"] for c in repo.top_level_sessions_computed_before("2026-06-01T00:00:00+00:00")]
+    assert got == ["claude_code:old"]
+
+
+def test_sessions_with_untyped_agent_calls_and_app_meta(repo):
+    # Regression: Agent calls ingested before the Task->Agent rename fix have
+    # subagent_type NULL; the collector re-reads those sessions once and records
+    # completion in app_meta so default-agent calls don't re-trigger it forever.
+    repo.upsert_session(SAMPLE)
+    repo.upsert_tool_calls(
+        [
+            ToolCall(id="claude_code:s1:a1", session_id=SAMPLE.id, turn_index=0, tool_name="Agent",
+                     is_error=0, input_size=10, subagent_type=None, timestamp="2026-05-01T10:00:00Z"),
+            ToolCall(id="claude_code:s1:b1", session_id=SAMPLE.id, turn_index=1, tool_name="Bash",
+                     is_error=0, input_size=10, subagent_type=None, timestamp="2026-05-01T10:00:01Z"),
+        ]
+    )
+    assert [c["id"] for c in repo.sessions_with_untyped_agent_calls(10)] == [SAMPLE.id]
+    assert repo.get_app_meta("backfill_agent_subagent_type_v1") is None
+    repo.set_app_meta("backfill_agent_subagent_type_v1", "1")
+    assert repo.get_app_meta("backfill_agent_subagent_type_v1") == "1"

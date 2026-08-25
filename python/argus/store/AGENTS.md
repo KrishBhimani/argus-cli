@@ -29,7 +29,10 @@ migrations; `repository.py` is the typed read/write API over SQLite.
   via `is_search_indexing_enabled` / `set_search_indexing_enabled`. Segments are
   written by `collector/` only when this is on. Backfill selectors
   (`sessions_missing_segments`, `_missing_tool_calls`, `_missing_tool_use_ids`,
-  `_with_unpriced_turns`) feed `collector/first_run.py` — keep their shapes stable.
+  `_with_unpriced_turns`, `top_level_sessions_computed_before`) feed
+  `collector/first_run.py` — keep their shapes stable. The last one is
+  deliberately unbounded: the collector filters to files still on disk before
+  applying its per-run cap.
 - **Upserts are idempotent** (conflict-replace) so re-ingesting a file from a reset
   offset never duplicates or corrupts rows.
 
