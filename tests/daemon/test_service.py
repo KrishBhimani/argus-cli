@@ -10,12 +10,22 @@ from argus.daemon import pidfile, service
 
 
 class _FakeRuntime:
+    """Stand-in for CoreRuntime — keep this signature-compatible with the real
+    one, or these tests pass while the daemon is broken."""
+
     def __init__(self, *a, **k):
         self.started = False
         self.stopped = False
+        self.require_adapters = None
+        self.activate_calls = 0
 
-    def start(self):
+    def start(self, *, require_adapters: bool = True):
         self.started = True
+        self.require_adapters = require_adapters
+
+    def try_activate(self) -> bool:
+        self.activate_calls += 1
+        return False
 
     def stop(self):
         self.stopped = True
@@ -41,6 +51,8 @@ def test_run_foreground_writes_pid_runs_and_cleans_up(tmp_path, monkeypatch):
         time.sleep(0.01)
     assert pidfile.read(tmp_path) is not None
     assert fake.started is True
+    # The daemon must tolerate a missing ~/.claude rather than exiting (issue #11).
+    assert fake.require_adapters is False
 
     stop.set()
     t.join(timeout=3)
