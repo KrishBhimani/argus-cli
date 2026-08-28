@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const routes: [string, string][] = [
   ['/', 'Overview'], ['/alerts', 'Alerts'], ['/sessions', 'Sessions'], ['/tools', 'Tools'], ['/models', 'Models'],
-  ['/trends', 'Trends'], ['/search', 'Transcripts'], ['/budgets', 'Budgets'], ['/settings', 'Settings'],
+  ['/trends', 'Trends'], ['/search', 'Transcripts'], ['/settings', 'Settings'],
 ];
 
 for (const [path, crumb] of routes) {

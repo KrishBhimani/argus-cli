@@ -17,8 +17,8 @@ const Code = ({ children }: { children: string }) => <span className="font-mono 
 
 const DETECTORS = [
   { n: 'tool_error_rate_spike', on: true, note: '7d vs 28d' },
-  { n: 'cost_spike', on: false, note: 'with Budgets' },
-  { n: 'cache_hit_drop', on: false, note: 'with Budgets' },
+  { n: 'cost_spike', on: false, note: 'planned' },
+  { n: 'cache_hit_drop', on: false, note: 'planned' },
 ];
 
 export default function AlertsPage() {

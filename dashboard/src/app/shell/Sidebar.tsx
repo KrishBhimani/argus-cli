@@ -2,7 +2,7 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { useIngestStatus, usePricing, useUnseenAlerts } from '@/lib/api/hooks';
 
-const GROUPS: { h: string; items: { to: string; label: string; icon: IconName; soon?: boolean }[] }[] = [
+const GROUPS: { h: string; items: { to: string; label: string; icon: IconName }[] }[] = [
   { h: 'MONITOR', items: [{ to: '/', label: 'Overview', icon: 'grid' }, { to: '/alerts', label: 'Alerts', icon: 'bell' }] },
   {
     h: 'ANALYZE',
@@ -14,7 +14,7 @@ const GROUPS: { h: string; items: { to: string; label: string; icon: IconName; s
     ],
   },
   { h: 'SEARCH', items: [{ to: '/search', label: 'Transcripts', icon: 'search' }] },
-  { h: 'GOVERN', items: [{ to: '/budgets', label: 'Budgets', icon: 'wallet', soon: true }, { to: '/settings', label: 'Settings', icon: 'gear' }] },
+  { h: 'GOVERN', items: [{ to: '/settings', label: 'Settings', icon: 'gear' }] },
 ];
 
 export function Sidebar() {
@@ -52,7 +52,6 @@ export function Sidebar() {
                 {it.label === 'Alerts' && unseen > 0 && (
                   <span className="ml-auto font-mono text-[10px] px-1.5 rounded-sm bg-warn/14 text-warn">{unseen}</span>
                 )}
-                {it.soon && <span className="ml-auto font-mono text-[10px] px-1.5 rounded-sm bg-bg-3 text-ink-2">soon</span>}
               </Link>
             ))}
           </div>
