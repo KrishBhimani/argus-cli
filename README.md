@@ -52,7 +52,7 @@ The dashboard is organised by the job you came to do.
 | Page | What it answers |
 |---|---|
 | **Overview** | Four tiles — tokens, estimated cost, sessions, tool error rate — each with its **change vs. the previous window**. A "Needs attention" strip that is always visible (it says *all clear* when there's nothing). Tokens per day, stackable by model. A 90-day activity heatmap and a **weekday × hour** map of when you start sessions. Top sessions in the window. |
-| **Alerts** | The inbox for detector findings, with unseen / all / severity filters and a 30-day strip. Today's detector flags any tool whose error rate doubled against its 4-week baseline; more arrive with Budgets. |
+| **Alerts** | The inbox for detector findings, with unseen / all / severity filters and a 30-day strip. Today's detector flags any tool whose error rate doubled against its 4-week baseline; more are planned. |
 
 ### Analyze
 
@@ -73,8 +73,7 @@ deterministic, offline. Off by default; see [Privacy](#privacy--security).
 
 ### Govern
 
-**Settings** (indexing toggle, pricing version, export, parse errors) today;
-**Budgets** — monthly ceilings with threshold alerts — is the next slot.
+**Settings** (indexing toggle, pricing version, export, parse errors).
 
 Every chart follows a few house rules: one axis per chart, a legend whenever there's
 more than one series, status colours always paired with an icon and a label, and a

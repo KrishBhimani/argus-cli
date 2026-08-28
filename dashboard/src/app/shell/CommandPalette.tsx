@@ -6,7 +6,7 @@ import { shortDate, shortPath } from '@/lib/format/format';
 
 const PAGES = [
   ['Overview', '/'], ['Alerts', '/alerts'], ['Sessions', '/sessions'], ['Tools', '/tools'], ['Models', '/models'],
-  ['Trends', '/trends'], ['Transcripts', '/search'], ['Budgets', '/budgets'], ['Settings', '/settings'],
+  ['Trends', '/trends'], ['Transcripts', '/search'], ['Settings', '/settings'],
 ] as const;
 const HEADING = '[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:tracking-[0.12em] [&_[cmdk-group-heading]]:text-ink-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1';
 const ITEM = 'px-2 h-8 flex items-center gap-3 rounded-md text-xs data-[selected=true]:bg-bg-3 cursor-pointer';
