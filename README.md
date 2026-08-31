@@ -301,6 +301,8 @@ tests/                pytest suite, mirrors python/argus/ layout
 
 <p>MIT — see <a href="./LICENSE">LICENSE</a>.</p>
 
-<p><i>If Argus just remembered a session Claude had already forgotten, consider a ⭐</i></p>
+<p><i>Named for Argus Panoptes — the watchman with a hundred eyes, who never slept.</i></p>
+
+<p>If it keeps good watch for you, a ⭐ helps other Claude Code users find it.</p>
 
 </div>
