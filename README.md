@@ -26,10 +26,11 @@
 </div>
 
 Claude Code writes a detailed transcript of every session to `~/.claude/` — every turn,
-every token, every tool call, every sub-agent it spawned — and then **deletes it after
-30 days**. Argus tails those files into a SQLite archive on your machine, prices each
-turn, and serves a dashboard at `http://localhost:4242` that answers the questions the
-transcripts never do: *what am I spending, where did it go, and which turn made it so?*
+every token, every tool call, every sub-agent it spawned — and then tells you almost
+nothing about it. Argus tails those files into a SQLite archive on your machine, prices
+each turn, and serves a dashboard at `http://localhost:4242` that answers the questions
+the transcripts never do: *what am I spending, where did it go, and which turn made it
+so?*
 
 Nothing leaves your computer. No telemetry, no API calls, no embeddings — SQLite and a
 static web app, bound to `127.0.0.1`.
@@ -49,13 +50,19 @@ then on, every session you run is ingested live. All you need is Python ≥ 3.11
 
 ## ✨ Why Argus
 
-Tools like `ccusage` read what's on disk *right now*. Claude Code rotates its own logs
-(`cleanupPeriodDays`, default 30), so "right now" is a sliding month. Once Argus has
-ingested a session into `~/.argus/argus.db` the row stays forever — a few months in,
-Argus remembers sessions Claude has already forgotten. **It accumulates.**
+**It does forensics, not just totals.** Argus keeps the *structure* of every session —
+turns, tool calls, sub-agents, cache reads — not just its sums. So you can find the
+turn that blew the budget, the tool that quietly started failing last Tuesday, and
+exactly what a sub-agent was told before it went off the rails.
 
-And because it keeps the *structure* of each session (turns, tool calls, sub-agents,
-cache hits), it can do forensics, not just totals.
+**It watches for you.** Detectors re-check your data every 10 minutes against
+historical baselines and file alerts — a tool whose error rate doubles gets flagged the
+day it breaks, not when you happen to notice.
+
+**It accumulates.** Usage tools like `ccusage` read what's on disk *right now*, and
+Claude Code rotates its own logs (`cleanupPeriodDays`, default 30) — so "right now" is
+a sliding month. Once Argus has ingested a session into `~/.argus/argus.db` the row
+stays forever; a few months in, Argus remembers sessions Claude has already forgotten.
 
 ## 🔭 A tour
 
