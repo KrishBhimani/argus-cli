@@ -1,10 +1,29 @@
-# Argus
+<div align="center">
 
-**The observability console for Claude Code — local-first, permanent, and honest about cost.**
+<img src="https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/logo.svg" width="84" alt="Argus logo">
 
-[![PyPI](https://img.shields.io/pypi/v/argus-code)](https://pypi.org/project/argus-code/)
-[![Python ≥ 3.11](https://img.shields.io/badge/python-%E2%89%A5%203.11-blue)](#requirements)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+<h1>Argus</h1>
+
+<p><strong>The observability console for Claude Code — local-first, permanent, and honest about cost.</strong></p>
+
+<p>
+  <a href="#-quick-start"><b>Quick start</b></a> ·
+  <a href="#-a-tour"><b>Tour</b></a> ·
+  <a href="#-cli"><b>CLI</b></a> ·
+  <a href="#-privacy--security"><b>Privacy</b></a> ·
+  <a href="./ARCHITECTURE.md"><b>Architecture</b></a> ·
+  <a href="./CONTRIBUTING.md"><b>Contributing</b></a>
+</p>
+
+<p>
+  <a href="https://pypi.org/project/argus-code/"><img src="https://img.shields.io/pypi/v/argus-code?color=f0883e" alt="PyPI"></a>
+  <a href="https://pypi.org/project/argus-code/"><img src="https://img.shields.io/pypi/dm/argus-code?color=f0883e" alt="PyPI downloads"></a>
+  <a href="#-requirements"><img src="https://img.shields.io/badge/python-%E2%89%A5%203.11-blue" alt="Python ≥ 3.11"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
+  <a href="https://github.com/KrishBhimani/argus-code"><img src="https://img.shields.io/github/stars/KrishBhimani/argus-code?style=flat&logo=github&color=8b94a3" alt="GitHub stars"></a>
+</p>
+
+</div>
 
 Claude Code writes a detailed transcript of every session to `~/.claude/` — every turn,
 every token, every tool call, every sub-agent it spawned — and then **deletes it after
@@ -15,19 +34,20 @@ transcripts never do: *what am I spending, where did it go, and which turn made 
 Nothing leaves your computer. No telemetry, no API calls, no embeddings — SQLite and a
 static web app, bound to `127.0.0.1`.
 
+<img src="https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/hero.png" alt="The Argus overview — tokens, cost, sessions and tool error rate at a glance">
+
+## 🚀 Quick start
+
 ```sh
 pipx install argus-code     # or:  uv tool install argus-code
 argus start
 ```
 
 Your browser opens once the first pass finishes (5–10 s for a typical install). From
-then on, every session you run is ingested live.
+then on, every session you run is ingested live. All you need is Python ≥ 3.11 and a
+`~/.claude/` directory — i.e. you've used Claude Code at least once.
 
-![Argus overview — tokens, cost, sessions and tool error rate at a glance](https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/overview.png)
-
----
-
-## Why Argus
+## ✨ Why Argus
 
 Tools like `ccusage` read what's on disk *right now*. Claude Code rotates its own logs
 (`cleanupPeriodDays`, default 30), so "right now" is a sliding month. Once Argus has
@@ -37,9 +57,7 @@ Argus remembers sessions Claude has already forgotten. **It accumulates.**
 And because it keeps the *structure* of each session (turns, tool calls, sub-agents,
 cache hits), it can do forensics, not just totals.
 
----
-
-## A tour
+## 🔭 A tour
 
 ### Every session, priced
 
@@ -47,7 +65,7 @@ A virtualised, sortable grid of every session you've ever run, with inline token
 and a **duration × tokens scatter** (log–log, coloured by model) that makes outliers
 obvious. Filter by text, project, model or time window; export to CSV.
 
-![Sessions — sortable grid with duration × tokens scatter](https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/sessions.png)
+<img src="https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/sessions.png" alt="Sessions — sortable grid with duration × tokens scatter">
 
 ### Session forensics
 
@@ -57,7 +75,7 @@ mix with error segments, and a timeline where every turn expands into its tool c
 sizes, status and error text inline. Resumed sessions are stitched into one
 chronological thread.
 
-![Session detail — per-turn shape, cumulative cost, tool mix](https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/session-detail.png)
+<img src="https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/session-detail.png" alt="Session detail — per-turn shape, cumulative cost, tool mix">
 
 ### Sub-agent X-ray
 
@@ -66,7 +84,7 @@ given**, its tools, tokens, cost, shape and full timeline — with an at-a-glanc
 that turns red where an agent failed. No more guessing what that `Task` call actually
 did.
 
-![Sub-agents — task given, tools used, per-agent shape and cost](https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/subagents.png)
+<img src="https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/subagents.png" alt="Sub-agents — task given, tools used, per-agent shape and cost">
 
 ### Trends that use rates, not totals
 
@@ -74,7 +92,7 @@ This period vs last, a monthly run-rate projection, tokens per session, cache-re
 share, and **$ per million tokens as you actually experienced it** — so you can tell
 "I'm working more" apart from "each session got more expensive".
 
-![Trends — weekly tokens by model, run rate, unit cost](https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/trends.png)
+<img src="https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/trends.png" alt="Trends — weekly tokens by model, run rate, unit cost">
 
 ### Tool health
 
@@ -83,13 +101,13 @@ servers, and sub-agent invocations by type. A detector re-checks error rates eve
 minutes against a 4-week baseline and files an **alert** when a tool's failures double —
 so you notice the day a tool breaks, not the week after.
 
-![Tools — leaderboard with error segments and calls per day](https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/tools.png)
+<img src="https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/screenshots/tools.png" alt="Tools — leaderboard with error segments and calls per day">
 
 ### Full-text search *(opt-in)*
 
 Search every prompt you've typed **and** every assistant reply, thinking block and tool
 output. SQLite FTS5 — sub-millisecond, lexical, deterministic, offline. Off by default;
-see [Privacy](#privacy--security).
+see [Privacy](#-privacy--security).
 
 ### House rules
 
@@ -97,9 +115,7 @@ Every chart follows a few rules: one axis per chart, a legend whenever there's m
 one series, status colours always paired with an icon and a label, and a table view
 behind every chart. Tokens are exact; costs are estimates, and the UI says so.
 
----
-
-## CLI
+## 💻 CLI
 
 ```sh
 argus start                 # watcher + ingester + dashboard at :4242
@@ -187,9 +203,7 @@ ones.
 
 </details>
 
----
-
-## Privacy & security
+## 🔒 Privacy & security
 
 Argus is built for one person on one machine, and the defaults say so.
 
@@ -204,9 +218,7 @@ Argus is built for one person on one machine, and the defaults say so.
 Your data is one file, `~/.argus/argus.db`. `argus wipe` deletes it; so does `rm`.
 Vulnerability reports: [SECURITY.md](./SECURITY.md).
 
----
-
-## How it works
+## ⚙️ How it works
 
 1. **Ingest.** A `watchdog` observer tails `~/.claude/projects/<project>/<session>.jsonl`. Lines are validated with `pydantic`, de-duplicated by `message.id`, and normalised into session / turn rows in SQLite (WAL mode). Resumed sessions and sub-agent files are folded into their parent.
 2. **Cost.** Per-turn cost comes from a bundled price table sourced from [LiteLLM](https://github.com/BerriAI/litellm). Tokens are exact; costs are estimates.
@@ -217,9 +229,7 @@ Vulnerability reports: [SECURITY.md](./SECURITY.md).
 
 Want the deeper tour? [ARCHITECTURE.md](./ARCHITECTURE.md).
 
----
-
-## Configuration
+## 🔧 Configuration
 
 | Where | Knob |
 |---|---|
@@ -239,14 +249,12 @@ Claude Code deletes session files after 30 days by default. Raise it in
 
 Argus keeps its own copy regardless — this only widens what Claude itself retains.
 
-## Requirements
+## 📋 Requirements
 
 - **Python ≥ 3.11** with an FTS5-enabled `sqlite3` (the standard CPython builds for macOS, Linux and Windows all are; Argus checks at startup and says so clearly if not).
 - A `~/.claude/` directory with real session JSONL — i.e. you've used Claude Code at least once.
 
----
-
-## Development
+## 🛠️ Development
 
 ```sh
 git clone https://github.com/KrishBhimani/argus-code.git
@@ -285,6 +293,14 @@ tests/                pytest suite, mirrors python/argus/ layout
 
 </details>
 
-## License
+---
 
-MIT — see [LICENSE](./LICENSE).
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/KrishBhimani/argus-code/main/assets/logo.svg" width="36" alt="">
+
+<p>MIT — see <a href="./LICENSE">LICENSE</a>.</p>
+
+<p><i>If Argus just remembered a session Claude had already forgotten, consider a ⭐</i></p>
+
+</div>
