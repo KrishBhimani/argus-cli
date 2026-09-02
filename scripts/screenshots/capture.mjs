@@ -5,6 +5,7 @@
 //
 //   node scripts/screenshots/capture.mjs --out <dir> [--url http://127.0.0.1:4243]
 //                                        [--session <id>] [--query <text>] [--project <substr>]
+//                                        [--only <name,name>]
 //
 // Raw output is 3200x2000 (1600x1000 @2x). Run frame.mjs afterwards to produce the
 // framed 2880x1760 images that live in assets/.
@@ -27,6 +28,7 @@ const url = (args.url ?? 'http://127.0.0.1:4243').replace(/\/$/, '');
 const session = args.session ?? 'claude_code:d07cb127-cbd5-4741-8303-f71dfa2f36f9';
 const query = args.query ?? 'refactor';
 const project = args.project ?? null; // substring of a project path to filter search by
+const only = args.only ? new Set(args.only.split(',')) : null; // capture a subset by name
 const out = args.out;
 if (!out) {
   console.error('--out <dir> is required');
@@ -46,7 +48,7 @@ const shots = [
   { name: 'tools', path: '/tools' },
   { name: 'alerts', path: '/alerts' },
   { name: 'search', path: '/search', after: typeQuery },
-  { name: 'settings', path: '/settings' },
+  { name: 'settings', path: '/settings', after: redactPaths },
 ];
 
 // Expand one turn row so the timeline shows a tool-call block. Prefer a turn with a
@@ -81,9 +83,23 @@ async function typeQuery(page) {
   await page.waitForTimeout(1200); // 250 ms debounce + fetch + render
 }
 
+// Replace local file paths in the Parse errors list with a generic form so the
+// published screenshot does not carry a username or private project folder names.
+async function redactPaths(page) {
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll('summary')) {
+      if (/^[A-Za-z]:\\|^\//.test(el.textContent ?? '')) {
+        el.textContent = String.raw`C:\Users\you\.claude\projects\<project>\<session>.jsonl`;
+      }
+    }
+  });
+  await page.waitForTimeout(150);
+}
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 });
 for (const s of shots) {
+  if (only && !only.has(s.name)) continue;
   await page.goto(url + s.path, { waitUntil: 'networkidle' });
   await page.waitForTimeout(700); // let charts settle
   if (s.after) await s.after(page);

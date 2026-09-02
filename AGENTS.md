@@ -78,6 +78,17 @@ When cutting version `X.Y.Z`:
    token is the maintainer's secret; **an agent must never run this or handle the
    token.** Stop and hand off.
 
+### Screenshots (README + site)
+
+`assets/` is the only tracked image location (`docs/` is gitignored). Regenerate
+every dashboard screenshot with an Argus instance running on a spare port:
+`uv run argus start --port 4243`, then
+`node scripts/screenshots/capture.mjs --out <tmp>` and
+`node scripts/screenshots/frame.mjs --in <tmp>`. Filenames are stable; the README
+and the site repo (`KrishBhimani/argus`) hotlink them from `main`. The capture
+script redacts the Settings parse-error paths in-page before shooting; extend the
+same hook rather than editing images by hand.
+
 ## Work Guidance
 
 Global engineering rules (binding):
