@@ -96,6 +96,71 @@ async function redactPaths(page) {
   await page.waitForTimeout(150);
 }
 
+// Project-name redaction, applied to every screen. Any path under the user's profile or
+// documents folder is rewritten to `~/projects/<alias>`, and bare mentions of the same
+// project names in prose get the same alias. Aliases are stable across all screenshots
+// (project-a, project-b, ...). Names in KEEP_PROJECT_NAMES are public and stay as-is.
+const KEEP_PROJECT_NAMES = new Set(['argus-code']);
+const aliases = new Map();
+function aliasFor(name) {
+  if (KEEP_PROJECT_NAMES.has(name)) return name;
+  if (!aliases.has(name)) {
+    // a, b, ..., z, aa, ab, ... so more than 26 projects still get readable aliases.
+    let n = aliases.size;
+    let suffix = '';
+    do {
+      suffix = String.fromCharCode(97 + (n % 26)) + suffix;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    aliases.set(name, `project-${suffix}`);
+  }
+  return aliases.get(name);
+}
+// A path segment may contain a space ("gen ai/argus-cli"), so a space is consumed only
+// when the chunk after it still contains a slash; prose after a path is left alone.
+const PATH_RE = String.raw`(?:[A-Za-z]:[\\/](?:Users[\\/][^\\/\s]+[\\/])?documents[\\/]|…[\\/])(?:[^\s"'\`)]+|[ ]+(?=[^\s"'\`)]*[\\/]))*`;
+
+async function redactProjects(page) {
+  // Pass 1: discover the last segment of every matching path so aliases are assigned in Node.
+  const names = await page.evaluate((re) => {
+    const rx = new RegExp(re, 'g');
+    const found = new Set();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      for (const m of walker.currentNode.nodeValue.matchAll(rx)) {
+        const parts = m[0].split(/[\\/]/).filter(Boolean);
+        found.add(parts[parts.length - 1]);
+      }
+    }
+    return [...found];
+  }, PATH_RE);
+  const mapping = Object.fromEntries(names.map((n) => [n, aliasFor(n)]));
+  // Pass 2: rewrite paths, then user-profile paths, then bare project names.
+  await page.evaluate(({ re, mapping }) => {
+    const rx = new RegExp(re, 'g');
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      let t = node.nodeValue;
+      t = t.replace(rx, (m) => {
+        const parts = m.split(/[\\/]/).filter(Boolean);
+        return `~/projects/${mapping[parts[parts.length - 1]] ?? 'project'}`;
+      });
+      t = t.replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, 'C:\\Users\\you');
+      // Longest names first, and hyphens/dots/underscores count as part of a name, so
+      // "argus" never matches inside "argus-code".
+      const entries = Object.entries(mapping).filter(([name, alias]) => name !== alias).sort((a, b) => b[0].length - a[0].length);
+      for (const [name, alias] of entries) {
+        t = t.replace(new RegExp(`(^|[^A-Za-z0-9._-])${esc(name)}(?![A-Za-z0-9._-])`, 'g'), `$1${alias}`);
+      }
+      if (t !== node.nodeValue) node.nodeValue = t;
+    }
+  }, { re: PATH_RE, mapping });
+  await page.waitForTimeout(150);
+}
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 });
 for (const s of shots) {
@@ -103,6 +168,7 @@ for (const s of shots) {
   await page.goto(url + s.path, { waitUntil: 'networkidle' });
   await page.waitForTimeout(700); // let charts settle
   if (s.after) await s.after(page);
+  await redactProjects(page);
   const file = path.join(out, `${s.name}.png`);
   await page.screenshot({ path: file, fullPage: false });
   console.log('captured', s.name, '->', file);
